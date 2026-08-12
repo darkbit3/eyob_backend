@@ -66,6 +66,17 @@ app.get('/health', (_req, res) => {
   });
 });
 
+// ── Root Info ────────────────────────────────────────────────────────────────
+app.get('/', (_req, res) => {
+  res.json({
+    success: true,
+    service: 'BidLow Backend API',
+    message: 'Welcome to the BidLow Backend. See /health and /api/* for endpoints.',
+    health: '/health',
+    api: '/api',
+  });
+});
+
 // ── API Routes ────────────────────────────────────────────────────────────────
 app.use('/api/auth',          authRoutes);
 app.use('/api/users',         userRoutes);
