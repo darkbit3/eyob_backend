@@ -34,8 +34,9 @@ app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
 // ── CORS — allow both frontend (5173) and admin (5174) ─────────────────────
 const allowedOrigins = [
-  process.env.FRONTEND_URL || 'http://localhost:5173',
-  process.env.ADMIN_URL    || 'http://localhost:5174',
+  process.env.FRONTEND_URL || 'http://localhost:5173' || 'https://eyob-z2xx.onrender.com',
+  process.env.ADMIN_URL    || 'http://localhost:5174' || 'https://eyob-admin.onrender.com',
+  process.env.BACKEND_URL  || 'https://eyob-backend.onrender.com',
 ];
 
 app.use(cors({
