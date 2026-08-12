@@ -27,7 +27,7 @@ router.get('/transactions', authenticate, asyncHandler(async (req: Request, res:
   const user = (req as any).user;
   const limitParam = Number(req.query.limit) || 20;
 
-  if (user.role === 'admin' || user.role === 'moderator') {
+  if (user.role === 'admin') {
     const rows = await query('SELECT * FROM transactions ORDER BY created_at DESC LIMIT $1', [limitParam]);
     res.json({ success: true, data: rows });
   } else {

@@ -57,7 +57,7 @@ router.post('/announcements', authenticate, requireAdmin, asyncHandler(async (re
   } else if (audience === 'Customers Only') {
     userCount = await query("SELECT COUNT(*) AS cnt FROM users WHERE role = 'customer'");
   } else if (audience === 'Admins Only') {
-    userCount = await query("SELECT COUNT(*) AS cnt FROM users WHERE role IN ('admin','moderator')");
+    userCount = await query("SELECT COUNT(*) AS cnt FROM users WHERE role = 'admin'");
   } else {
     userCount = await query(
       "SELECT COUNT(DISTINCT bidder_id) AS cnt FROM bids b JOIN auctions a ON a.id = b.auction_id WHERE a.status = 'active'"
@@ -80,7 +80,7 @@ router.post('/announcements', authenticate, requireAdmin, asyncHandler(async (re
   } else if (audience === 'Customers Only') {
     targetUsers = await query("SELECT id FROM users WHERE role = 'customer' AND status = 'active'");
   } else if (audience === 'Admins Only') {
-    targetUsers = await query("SELECT id FROM users WHERE role IN ('admin','moderator') AND status = 'active'");
+    targetUsers = await query("SELECT id FROM users WHERE role = 'admin' AND status = 'active'");
   } else {
     targetUsers = await query(
       "SELECT DISTINCT bidder_id AS id FROM bids b JOIN auctions a ON a.id = b.auction_id WHERE a.status = 'active'"

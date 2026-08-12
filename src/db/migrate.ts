@@ -14,7 +14,7 @@ async function migrate() {
       phone          VARCHAR(30)    NOT NULL UNIQUE,
       password_hash  VARCHAR(255)   NOT NULL,
       photo_url      TEXT,
-      role           VARCHAR(20)    NOT NULL DEFAULT 'customer' CHECK (role IN ('admin','moderator','customer')),
+      role           VARCHAR(20)    NOT NULL DEFAULT 'customer' CHECK (role IN ('admin','customer')),
       status         VARCHAR(20)    NOT NULL DEFAULT 'active'   CHECK (status IN ('active','suspended')),
       wallet_balance NUMERIC(14,2)  NOT NULL DEFAULT 0,
       credits        INTEGER        NOT NULL DEFAULT 0,

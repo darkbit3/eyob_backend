@@ -23,7 +23,7 @@ router.get('/', authenticate, requireAdmin, asyncHandler(async (_req: Request, r
 // GET /api/winners/:auctionId/bids — bid transparency log for a closed auction
 router.get('/:auctionId/bids', authenticate, asyncHandler(async (req: Request, res: Response) => {
   const user = (req as any).user;
-  const isAdmin = user.role === 'admin' || user.role === 'moderator';
+  const isAdmin = user.role === 'admin';
 
   const auction = await queryOne(
     'SELECT id, title, status FROM auctions WHERE id = $1',

@@ -4,7 +4,7 @@ import { Request, Response, NextFunction } from 'express';
 export interface JwtPayload {
   userId: string;
   email: string;
-  role: 'admin' | 'moderator' | 'customer';
+  role: 'admin' | 'customer';
 }
 
 export function signToken(payload: JwtPayload): string {
@@ -35,22 +35,15 @@ export function authenticate(req: Request, res: Response, next: NextFunction): v
   }
 }
 
-// ── Middleware: admin or moderator only ────────────────────────────────────
+// ── Middleware: admin only ─────────────────────────────────────────────────
 export function requireAdmin(req: Request, res: Response, next: NextFunction): void {
   const user = (req as any).user as JwtPayload;
-  if (!user || (user.role !== 'admin' && user.role !== 'moderator')) {
+  if (!user || user.role !== 'admin') {
     res.status(403).json({ success: false, message: 'Admin access required' });
     return;
   }
   next();
 }
 
-// ── Middleware: super admin only ───────────────────────────────────────────
-export function requireSuperAdmin(req: Request, res: Response, next: NextFunction): void {
-  const user = (req as any).user as JwtPayload;
-  if (!user || user.role !== 'admin') {
-    res.status(403).json({ success: false, message: 'Super admin access required' });
-    return;
-  }
-  next();
-}
+// requireSuperAdmin is now identical to requireAdmin — kept as alias for backwards compatibility
+export const requireSuperAdmin = requireAdmin;

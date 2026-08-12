@@ -57,7 +57,7 @@ async function computeLowestUniqueBid(auctionId: string) {
 // GET /api/bids/auction/:auctionId — get bid log for an auction
 router.get('/auction/:auctionId', authenticate, asyncHandler(async (req: Request, res: Response) => {
   const user = (req as any).user;
-  const isAdmin = user.role === 'admin' || user.role === 'moderator';
+  const isAdmin = user.role === 'admin';
 
   const rows = await query(
     `SELECT b.id, b.auction_id, b.masked_bidder_id,
@@ -74,8 +74,9 @@ router.get('/auction/:auctionId', authenticate, asyncHandler(async (req: Request
 
 // GET /api/bids — admin: list all bids for oversight
 router.get('/', authenticate, asyncHandler(async (req: Request, res: Response) => {
+
   const user = (req as any).user;
-  const isAdmin = user.role === 'admin' || user.role === 'moderator';
+  const isAdmin = user.role === 'admin';
 
   if (!isAdmin) {
     res.status(403).json({ success: false, message: 'Admin access required' });
