@@ -1,0 +1,198 @@
+import { Router, Request, Response } from 'express';
+import { query, queryOne } from '../db/client';
+import { authenticate, requireAdmin } from '../middleware/auth';
+import { asyncHandler } from '../middleware/errorHandler';
+
+const router = Router();
+
+// GET /api/auctions — public: list auctions with optional filters
+router.get('/', asyncHandler(async (req: Request, res: Response) => {
+  const { status, category, search } = req.query;
+
+  const rows = await query(
+    `SELECT a.*, p.name AS product_name
+     FROM auctions a
+     LEFT JOIN products p ON p.id = a.product_id
+     WHERE
+       ($1::text IS NULL OR a.status = $1)
+       AND ($2::text IS NULL OR a.category = $2)
+       AND ($3::text IS NULL OR a.title ILIKE '%' || $3 || '%')
+     ORDER BY a.created_at DESC`,
+    [status ? String(status) : null, category ? String(category) : null, search ? String(search) : null]
+  );
+
+  res.json({ success: true, data: rows });
+}));
+
+// GET /api/auctions/:id — public: get single auction
+router.get('/:id', asyncHandler(async (req: Request, res: Response) => {
+  const row = await queryOne(
+    `SELECT a.*, p.name AS product_name, p.description AS product_description
+     FROM auctions a
+     LEFT JOIN products p ON p.id = a.product_id
+     WHERE a.id = $1`,
+    [req.params.id]
+  );
+  if (!row) { res.status(404).json({ success: false, message: 'Auction not found' }); return; }
+  res.json({ success: true, data: row });
+}));
+
+// POST /api/auctions — admin: create auction
+router.post('/', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+  const {
+    product_id, title, description, image_url, retail_value,
+    category, status = 'draft', start_time, end_time, min_bid, max_bid,
+  } = req.body;
+
+  if (!title || !image_url || !retail_value || !category || !start_time || !end_time) {
+    res.status(400).json({ success: false, message: 'Missing required fields: title, image_url, retail_value, category, start_time, end_time' });
+    return;
+  }
+
+  const row = await queryOne(
+    `INSERT INTO auctions
+       (product_id, title, description, image_url, retail_value, category, status, start_time, end_time, min_bid, max_bid)
+     VALUES
+       ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+     RETURNING *`,
+    [
+      product_id || null, title, description || '', image_url,
+      Number(retail_value), category, status,
+      start_time, end_time, Number(min_bid) || 1, Number(max_bid) || 500
+    ]
+  );
+
+  if (status === 'upcoming' || status === 'active') {
+    const targetUsers = await query(`SELECT id FROM users WHERE status = 'active'`);
+    const notificationTitle = status === 'upcoming'
+      ? 'New Upcoming Auction'
+      : 'Live Auction Started';
+    const notificationMessage = status === 'upcoming'
+      ? `A new upcoming auction "${title}" will start on ${new Date(start_time).toLocaleString()}. Stay ready to bid!`
+      : `A new auction "${title}" is live now. Place your bids while it remains active.`;
+
+    for (const user of targetUsers) {
+      await query(
+        'INSERT INTO notifications (user_id, type, title, message) VALUES ($1, $2, $3, $4)',
+        [user.id as string, 'auction_started', notificationTitle, notificationMessage]
+      );
+    }
+  }
+
+  const adminId = (req as any).user.userId;
+  await query(
+    `INSERT INTO audit_logs (admin_id, admin_name, action, target, details, ip_address)
+     VALUES ($1, $2, 'Created Auction', $3, $4, $5)`,
+    [
+      adminId,
+      (req as any).user.email,
+      title,
+      `Category: ${category}, Retail Value: ${retail_value} ETB`,
+      req.ip || '0.0.0.0'
+    ]
+  );
+
+  res.status(201).json({ success: true, message: 'Auction created', data: row });
+}));
+
+// PATCH /api/auctions/:id — admin: update auction fields
+router.patch('/:id', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+  const {
+    title, description, image_url, retail_value, category,
+    status, start_time, end_time, min_bid, max_bid,
+  } = req.body;
+
+  const row = await queryOne(
+    `UPDATE auctions SET
+       title        = COALESCE($1, title),
+       description  = COALESCE($2, description),
+       image_url    = COALESCE($3, image_url),
+       retail_value = COALESCE($4, retail_value),
+       category     = COALESCE($5, category),
+       status       = COALESCE($6, status),
+       start_time   = COALESCE($7, start_time),
+       end_time     = COALESCE($8, end_time),
+       min_bid      = COALESCE($9, min_bid),
+       max_bid      = COALESCE($10, max_bid),
+       updated_at   = NOW()
+     WHERE id = $11
+     RETURNING *`,
+    [
+      title || null, description || null, image_url || null,
+      retail_value ? Number(retail_value) : null, category || null,
+      status || null, start_time || null, end_time || null,
+      min_bid ? Number(min_bid) : null, max_bid ? Number(max_bid) : null,
+      req.params.id
+    ]
+  );
+
+  if (!row) { res.status(404).json({ success: false, message: 'Auction not found' }); return; }
+
+  const adminId = (req as any).user.userId;
+  await query(
+    `INSERT INTO audit_logs (admin_id, admin_name, action, target, details, ip_address)
+     VALUES ($1, $2, 'Edited Auction', $3, $4, $5)`,
+    [
+      adminId,
+      (req as any).user.email,
+      row.title as string,
+      `Updated fields: ${Object.keys(req.body).join(', ')}`,
+      req.ip || '0.0.0.0'
+    ]
+  );
+
+  res.json({ success: true, message: 'Auction updated', data: row });
+}));
+
+// PATCH /api/auctions/:id/status — admin: pause / resume / cancel
+router.patch('/:id/status', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+  const { status } = req.body;
+  if (!['active', 'paused', 'closed', 'upcoming', 'draft'].includes(status)) {
+    res.status(400).json({ success: false, message: 'Invalid status value' });
+    return;
+  }
+
+  const closedAt = status === 'closed' ? new Date().toISOString() : null;
+
+  const row = await queryOne(
+    `UPDATE auctions SET
+       status    = $1,
+       closed_at = COALESCE($2, closed_at),
+       updated_at = NOW()
+     WHERE id = $3
+     RETURNING id, title, status`,
+    [status, closedAt, req.params.id]
+  );
+  if (!row) { res.status(404).json({ success: false, message: 'Auction not found' }); return; }
+
+  const actionMap: Record<string, string> = {
+    paused: 'Paused Auction', active: 'Resumed Auction', closed: 'Cancelled Auction',
+  };
+  const adminId = (req as any).user.userId;
+  await query(
+    `INSERT INTO audit_logs (admin_id, admin_name, action, target, details, ip_address)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [
+      adminId,
+      (req as any).user.email,
+      actionMap[status] || 'Updated Auction Status',
+      row.title as string,
+      `Auction status changed to ${status.toUpperCase()}.`,
+      req.ip || '0.0.0.0'
+    ]
+  );
+
+  res.json({ success: true, message: `Auction ${status}`, data: row });
+}));
+
+// DELETE /api/auctions/:id — admin: delete auction
+router.delete('/:id', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+  const row = await queryOne(
+    `DELETE FROM auctions WHERE id = $1 RETURNING id, title`,
+    [req.params.id]
+  );
+  if (!row) { res.status(404).json({ success: false, message: 'Auction not found' }); return; }
+  res.json({ success: true, message: 'Auction deleted', data: row });
+}));
+
+export default router;
