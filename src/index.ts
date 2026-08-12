@@ -63,6 +63,27 @@ app.use(cors({ origin: corsOptionsDelegate, credentials: true }));
 // Ensure OPTIONS preflight requests receive CORS headers
 app.options('*', cors({ origin: corsOptionsDelegate, credentials: true }));
 
+// Fallback: explicitly set CORS headers on all responses and handle preflight
+app.use((req, res, next) => {
+  const origin = req.headers.origin as string | undefined;
+  if (origin && allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS');
+  res.header(
+    'Access-Control-Allow-Headers',
+    'Origin, X-Requested-With, Content-Type, Accept, Authorization'
+  );
+
+  if (req.method === 'OPTIONS') {
+    // short-circuit preflight
+    res.sendStatus(204);
+    return;
+  }
+  next();
+});
+
 // ── Body Parsing ────────────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
