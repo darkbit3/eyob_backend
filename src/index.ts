@@ -37,8 +37,8 @@ const allowedOrigins = [
   process.env.FRONTEND_URL ?? 'https://eyob-z2xx.onrender.com',
   process.env.ADMIN_URL ?? 'https://eyob-admin.onrender.com',
   process.env.BACKEND_URL ?? 'https://eyob-backend.onrender.com',
-  'http://localhost:5173',
-  'http://localhost:5174',
+  'https://eyob-z2xx.onrender.com',
+  'https://eyob-admin.onrender.com',
 ];
 
 // CORS: reflect allowed origins and handle preflight explicitly.
