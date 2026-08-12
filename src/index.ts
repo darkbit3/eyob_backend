@@ -41,16 +41,27 @@ const allowedOrigins = [
   'http://localhost:5174',
 ];
 
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error(`CORS: Origin ${origin} not allowed`));
-    }
-  },
-  credentials: true,
-}));
+// CORS: reflect allowed origins and handle preflight explicitly.
+const corsOptionsDelegate = (origin: string | undefined, callback: (err: Error | null, allow?: boolean | string) => void) => {
+  // Log origin for debugging deploy-time CORS issues
+  console.log('CORS origin:', origin);
+  if (!origin) {
+    // No origin (e.g., curl, same-origin) — allow
+    return callback(null, true);
+  }
+  if (allowedOrigins.includes(origin)) {
+    // Reflect the origin
+    return callback(null, origin);
+  }
+  // Not allowed
+  console.warn(`CORS blocked origin: ${origin}`);
+  return callback(null, false);
+};
+
+app.use(cors({ origin: corsOptionsDelegate, credentials: true }));
+
+// Ensure OPTIONS preflight requests receive CORS headers
+app.options('*', cors({ origin: corsOptionsDelegate, credentials: true }));
 
 // ── Body Parsing ────────────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
