@@ -75,6 +75,7 @@ async function migrate() {
       description        TEXT,
       image_url          TEXT          NOT NULL,
       retail_value       NUMERIC(14,2) NOT NULL,
+      bid_per_cost       NUMERIC(10,2) NOT NULL DEFAULT 100,
       category           VARCHAR(80)   NOT NULL,
       status             VARCHAR(20)   NOT NULL DEFAULT 'draft'
                            CHECK (status IN ('draft','active','upcoming','paused','closed')),
@@ -93,6 +94,9 @@ async function migrate() {
     )
   `);
   console.log('  ✓ auctions');
+
+  // Add bid_per_cost column if it doesn't exist
+  await query(`ALTER TABLE auctions ADD COLUMN IF NOT EXISTS bid_per_cost NUMERIC(10,2) NOT NULL DEFAULT 100`);
 
   await query(`
     CREATE TABLE IF NOT EXISTS bids (

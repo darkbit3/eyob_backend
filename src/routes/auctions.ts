@@ -40,7 +40,7 @@ router.get('/:id', asyncHandler(async (req: Request, res: Response) => {
 // POST /api/auctions — admin: create auction
 router.post('/', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   const {
-    product_id, title, description, image_url, retail_value,
+    product_id, title, description, image_url, retail_value, bid_per_cost,
     category, status = 'draft', start_time, end_time, min_bid, max_bid,
   } = req.body;
 
@@ -51,13 +51,13 @@ router.post('/', authenticate, requireAdmin, asyncHandler(async (req: Request, r
 
   const row = await queryOne(
     `INSERT INTO auctions
-       (product_id, title, description, image_url, retail_value, category, status, start_time, end_time, min_bid, max_bid)
+       (product_id, title, description, image_url, retail_value, bid_per_cost, category, status, start_time, end_time, min_bid, max_bid)
      VALUES
-       ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
      RETURNING *`,
     [
       product_id || null, title, description || '', image_url,
-      Number(retail_value), category, status,
+      Number(retail_value), Number(bid_per_cost) || 100, category, status,
       start_time, end_time, Number(min_bid) || 1, Number(max_bid) || 500
     ]
   );
@@ -87,7 +87,7 @@ router.post('/', authenticate, requireAdmin, asyncHandler(async (req: Request, r
       adminId,
       (req as any).user.email,
       title,
-      `Category: ${category}, Retail Value: ${retail_value} ETB`,
+      `Category: ${category}, Retail Value: ${retail_value} ETB, Bid Per Cost: ${bid_per_cost || 100} ETB`,
       req.ip || '0.0.0.0'
     ]
   );
@@ -98,7 +98,7 @@ router.post('/', authenticate, requireAdmin, asyncHandler(async (req: Request, r
 // PATCH /api/auctions/:id — admin: update auction fields
 router.patch('/:id', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   const {
-    title, description, image_url, retail_value, category,
+    title, description, image_url, retail_value, bid_per_cost, category,
     status, start_time, end_time, min_bid, max_bid,
   } = req.body;
 
@@ -108,18 +108,19 @@ router.patch('/:id', authenticate, requireAdmin, asyncHandler(async (req: Reques
        description  = COALESCE($2, description),
        image_url    = COALESCE($3, image_url),
        retail_value = COALESCE($4, retail_value),
-       category     = COALESCE($5, category),
-       status       = COALESCE($6, status),
-       start_time   = COALESCE($7, start_time),
-       end_time     = COALESCE($8, end_time),
-       min_bid      = COALESCE($9, min_bid),
-       max_bid      = COALESCE($10, max_bid),
+       bid_per_cost = COALESCE($5, bid_per_cost),
+       category     = COALESCE($6, category),
+       status       = COALESCE($7, status),
+       start_time   = COALESCE($8, start_time),
+       end_time     = COALESCE($9, end_time),
+       min_bid      = COALESCE($10, min_bid),
+       max_bid      = COALESCE($11, max_bid),
        updated_at   = NOW()
-     WHERE id = $11
+     WHERE id = $12
      RETURNING *`,
     [
       title || null, description || null, image_url || null,
-      retail_value ? Number(retail_value) : null, category || null,
+      retail_value ? Number(retail_value) : null, bid_per_cost ? Number(bid_per_cost) : null, category || null,
       status || null, start_time || null, end_time || null,
       min_bid ? Number(min_bid) : null, max_bid ? Number(max_bid) : null,
       req.params.id
