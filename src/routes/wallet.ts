@@ -95,15 +95,19 @@ router.post('/queue', authenticate, asyncHandler(async (req: Request, res: Respo
   res.status(201).json({ success: true, message: 'Payment submission received. Awaiting admin verification.', data: row });
 }));
 
-// PATCH /api/wallet/queue/:id/approve — admin: approve payment
+// PATCH /api/wallet/queue/:id/approve — admin: approve deposit or withdrawal request
 router.patch('/queue/:id/approve', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   const item = await queryOne(
     `SELECT * FROM payment_queue WHERE id = $1 AND status = 'pending'`,
     [req.params.id]
   );
-  if (!item) { res.status(404).json({ success: false, message: 'Pending payment not found' }); return; }
+  if (!item) { res.status(404).json({ success: false, message: 'Pending queue item not found' }); return; }
 
+  const adminId = (req as any).user.userId;
   const adminName = (req as any).user.email;
+  const rawAmt = Number(item.amount || 0);
+  const isWithdrawal = rawAmt < 0 || (item.payment_method || '').toLowerCase().includes('withdraw');
+  const numAmt = Math.abs(rawAmt);
 
   // Approve queue item
   await query(
@@ -113,74 +117,117 @@ router.patch('/queue/:id/approve', authenticate, requireAdmin, asyncHandler(asyn
        reviewed_by = $2,
        updated_at = NOW()
      WHERE id = $3`,
-    [`Approved by ${adminName}`, (req as any).user.userId, req.params.id]
+    [`Approved by ${adminName}`, adminId, req.params.id]
   );
 
-  // Credit user wallet and credits
-  await query(
-    `UPDATE users SET
-       wallet_balance = wallet_balance + $1,
-       credits        = credits + $2,
-       updated_at     = NOW()
-     WHERE id = $3`,
-    [Number(item.amount), Number(item.credits), item.user_id as string]
-  );
-
-  // Decrease admin/platform wallet balance by the same amount (admin pays out user credits)
-  try {
+  if (isWithdrawal) {
+    // Withdrawal: Deduct from user wallet, credit admin/platform wallet
     await query(
       `UPDATE users SET
          wallet_balance = GREATEST(0, wallet_balance - $1),
          updated_at = NOW()
        WHERE id = $2`,
-      [Number(item.amount), (req as any).user.userId]
+      [numAmt, item.user_id as string]
     );
-  } catch (e: unknown) {
-    // non-fatal: log in DB but don't block approval
-    const message = e instanceof Error ? e.message : String(e);
-    console.warn('Failed to deduct admin wallet for approved payment', message);
+
+    await query(
+      `UPDATE users SET
+         wallet_balance = wallet_balance + $1,
+         updated_at = NOW()
+       WHERE id = $2`,
+      [numAmt, adminId]
+    );
+
+    // Log transaction
+    await query(
+      `INSERT INTO transactions (user_id, user_name, type, amount, description, status, payment_method)
+       VALUES ($1, $2, 'manual_withdrawal', $3, $4, 'completed', $5)`,
+      [
+        item.user_id as string,
+        item.user_name as string,
+        -numAmt,
+        `Approved withdrawal via ${item.payment_method} (Ref: ${item.reference_number})`,
+        item.payment_method as string
+      ]
+    );
+
+    // Notify user in database
+    await query(
+      `INSERT INTO notifications (user_id, type, title, message)
+       VALUES ($1, 'wallet_updated', 'Withdrawal Approved & Transferred ✅', $2)`,
+      [
+        item.user_id as string,
+        `Your withdrawal request of ${numAmt} ETB via ${item.payment_method} has been approved and processed!`
+      ]
+    );
+  } else {
+    // Deposit: Credit user wallet & credits, deduct admin wallet
+    await query(
+      `UPDATE users SET
+         wallet_balance = wallet_balance + $1,
+         credits        = credits + $2,
+         updated_at     = NOW()
+       WHERE id = $3`,
+      [numAmt, Number(item.credits || numAmt), item.user_id as string]
+    );
+
+    try {
+      await query(
+        `UPDATE users SET
+           wallet_balance = GREATEST(0, wallet_balance - $1),
+           updated_at = NOW()
+         WHERE id = $2`,
+        [numAmt, adminId]
+      );
+    } catch (_e) {}
+
+    // Log transaction
+    await query(
+      `INSERT INTO transactions (user_id, user_name, type, amount, description, status, payment_method)
+       VALUES ($1, $2, 'credit_purchase', $3, $4, 'completed', $5)`,
+      [
+        item.user_id as string,
+        item.user_name as string,
+        numAmt,
+        `Approved deposit via ${item.payment_method} (Ref: ${item.reference_number})`,
+        item.payment_method as string
+      ]
+    );
+
+    // Notify user in database
+    await query(
+      `INSERT INTO notifications (user_id, type, title, message)
+       VALUES ($1, 'wallet_updated', 'Deposit Approved! Wallet Updated ✅', $2)`,
+      [
+        item.user_id as string,
+        `Your deposit of ${numAmt} ETB via ${item.payment_method} has been approved and added to your wallet balance.`
+      ]
+    );
   }
 
-  // Log transaction
-  await query(
-    `INSERT INTO transactions (user_id, user_name, type, amount, description, status, payment_method)
-     VALUES ($1, $2, 'credit_purchase', $3, $4, 'completed', $5)`,
-    [
-      item.user_id as string,
-      item.user_name as string,
-      Number(item.amount),
-      `Approved deposit via ${item.payment_method} (Ref: ${item.reference_number})`,
-      item.payment_method as string
-    ]
-  );
-
-  // Notify user
-  await query(
-    `INSERT INTO notifications (user_id, type, title, message)
-     VALUES ($1, 'wallet_updated', 'Deposit Approved! Wallet Updated ✅', $2)`,
-    [
-      item.user_id as string,
-      `Your deposit of ${item.amount} ETB has been approved. ${item.credits} bidding credits added to your account.`
-    ]
-  );
-
-  // Audit
+  // Audit log
   await query(
     `INSERT INTO audit_logs (admin_id, admin_name, action, target, details, ip_address)
-     VALUES ($1, $2, 'Approved Payment', $3, $4, $5)`,
+     VALUES ($1, $2, $3, $4, $5, $6)`,
     [
-      (req as any).user.userId,
+      adminId,
       adminName,
+      isWithdrawal ? 'Approved Withdrawal' : 'Approved Payment',
       `${item.user_name} (${item.reference_number})`,
-      `Amount: ${item.amount} ETB, Credits added: ${item.credits}`,
+      `Amount: ${numAmt} ETB via ${item.payment_method}`,
       req.ip || '0.0.0.0'
     ]
   );
 
-  res.json({ success: true, message: `Payment approved — ${item.amount} ETB credited to ${item.user_name}` });
+  res.json({
+    success: true,
+    message: isWithdrawal
+      ? `Withdrawal approved — ${numAmt} ETB processed for ${item.user_name}`
+      : `Deposit approved — ${numAmt} ETB credited to ${item.user_name}`
+  });
 }));
 
-// PATCH /api/wallet/queue/:id/reject — admin: reject payment
+// PATCH /api/wallet/queue/:id/reject — admin: reject payment or withdrawal
 router.patch('/queue/:id/reject', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   const { reason } = req.body;
   const rejectionReason = reason || 'Verification details do not match bank statement';
@@ -189,7 +236,11 @@ router.patch('/queue/:id/reject', authenticate, requireAdmin, asyncHandler(async
     `SELECT * FROM payment_queue WHERE id = $1 AND status = 'pending'`,
     [req.params.id]
   );
-  if (!item) { res.status(404).json({ success: false, message: 'Pending payment not found' }); return; }
+  if (!item) { res.status(404).json({ success: false, message: 'Pending queue item not found' }); return; }
+
+  const rawAmt = Number(item.amount || 0);
+  const isWithdrawal = rawAmt < 0 || (item.payment_method || '').toLowerCase().includes('withdraw');
+  const numAmt = Math.abs(rawAmt);
 
   await query(
     `UPDATE payment_queue SET
@@ -201,30 +252,34 @@ router.patch('/queue/:id/reject', authenticate, requireAdmin, asyncHandler(async
     [`Rejected: ${rejectionReason}`, (req as any).user.userId, req.params.id]
   );
 
-  // Notify user
+  // Notify user in database
   await query(
     `INSERT INTO notifications (user_id, type, title, message)
-     VALUES ($1, 'payment_received', 'Deposit Rejected — Action Required', $2)`,
+     VALUES ($1, 'payment_received', $2, $3)`,
     [
       item.user_id as string,
-      `Your deposit (Ref: ${item.reference_number}) was rejected. Reason: ${rejectionReason}. Please contact support.`
+      isWithdrawal ? 'Withdrawal Request Rejected ❌' : 'Deposit Rejected — Action Required ❌',
+      isWithdrawal
+        ? `Your withdrawal request of ${numAmt} ETB was rejected. Reason: ${rejectionReason}. Please contact support.`
+        : `Your deposit of ${numAmt} ETB (Ref: ${item.reference_number}) was rejected. Reason: ${rejectionReason}. Please contact support.`
     ]
   );
 
   // Audit
   await query(
     `INSERT INTO audit_logs (admin_id, admin_name, action, target, details, ip_address)
-     VALUES ($1, $2, 'Rejected Payment', $3, $4, $5)`,
+     VALUES ($1, $2, $3, $4, $5, $6)`,
     [
       (req as any).user.userId,
       (req as any).user.email,
+      isWithdrawal ? 'Rejected Withdrawal' : 'Rejected Payment',
       `${item.user_name} (${item.reference_number})`,
       `Reason: ${rejectionReason}`,
       req.ip || '0.0.0.0'
     ]
   );
 
-  res.json({ success: true, message: 'Payment rejected' });
+  res.json({ success: true, message: isWithdrawal ? 'Withdrawal request rejected' : 'Payment deposit rejected' });
 }));
 
 export default router;
