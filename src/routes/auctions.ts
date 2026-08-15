@@ -231,15 +231,32 @@ router.post('/:id/unlock', authenticate, asyncHandler(async (req: Request, res: 
   const userId = (req as any).user.userId;
   const auctionId = req.params.id;
 
+  // Ensure auction_unlocks table exists (idempotent — safe to run every time)
+  await query(`
+    CREATE TABLE IF NOT EXISTS auction_unlocks (
+      user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      auction_id  UUID NOT NULL REFERENCES auctions(id) ON DELETE CASCADE,
+      amount_paid NUMERIC(10,2) NOT NULL,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (user_id, auction_id)
+    )
+  `);
+
   // Check if auction exists
-  const auction = await queryOne(`SELECT id, title, bid_per_cost, retail_value FROM auctions WHERE id = $1`, [auctionId]);
+  const auction = await queryOne(
+    `SELECT id, title, bid_per_cost FROM auctions WHERE id = $1`,
+    [auctionId]
+  );
   if (!auction) {
     res.status(404).json({ success: false, message: 'Auction not found' });
     return;
   }
 
   // Check if already unlocked
-  const existing = await queryOne(`SELECT 1 FROM auction_unlocks WHERE user_id = $1 AND auction_id = $2`, [userId, auctionId]);
+  const existing = await queryOne(
+    `SELECT 1 FROM auction_unlocks WHERE user_id = $1 AND auction_id = $2`,
+    [userId, auctionId]
+  );
   if (existing) {
     res.json({ success: true, message: 'Auction is already unlocked', data: { unlocked: true } });
     return;
@@ -258,37 +275,60 @@ router.post('/:id/unlock', authenticate, asyncHandler(async (req: Request, res: 
   if (currentBalance < fee) {
     res.status(400).json({
       success: false,
-      message: `Insufficient balance (${currentBalance} ETB). ${fee} ETB required to unlock this auction.`
+      message: `Insufficient balance. You have ${currentBalance} ETB but need ${fee} ETB to unlock this auction.`
     });
     return;
   }
 
-  // Deduct fee & record unlock
-  const updatedUser = await queryOne(
-    `UPDATE users SET wallet_balance = wallet_balance - $1, updated_at = NOW() WHERE id = $2 RETURNING wallet_balance`,
-    [fee, userId]
-  );
+  // Run deduction + unlock + transaction log inside a DB transaction
+  const client = await (await import('../db/client')).pool.connect();
+  try {
+    await client.query('BEGIN');
 
-  await query(
-    `INSERT INTO auction_unlocks (user_id, auction_id, amount_paid) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
-    [userId, auctionId, fee]
-  );
+    const updatedRows = await client.query(
+      `UPDATE users SET wallet_balance = wallet_balance - $1, updated_at = NOW()
+       WHERE id = $2 AND wallet_balance >= $1
+       RETURNING wallet_balance`,
+      [fee, userId]
+    );
 
-  // Record transaction
-  await query(
-    `INSERT INTO transactions (user_id, user_name, type, amount, description, status)
-     VALUES ($1, $2, 'bid_fee_paid', -$3, $4, 'completed')`,
-    [userId, user.name as string, fee, `Unlock entry fee for auction "${auction.title}"`]
-  );
-
-  res.json({
-    success: true,
-    message: `Auction unlocked successfully! Paid ${fee} ETB.`,
-    data: {
-      unlocked: true,
-      wallet_balance: updatedUser ? Number(updatedUser.wallet_balance) : Math.max(0, currentBalance - fee)
+    if (updatedRows.rowCount === 0) {
+      await client.query('ROLLBACK');
+      res.status(400).json({ success: false, message: 'Insufficient balance (race condition check failed).' });
+      return;
     }
-  });
+
+    await client.query(
+      `INSERT INTO auction_unlocks (user_id, auction_id, amount_paid)
+       VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+      [userId, auctionId, fee]
+    );
+
+    await client.query(
+      `INSERT INTO transactions (user_id, user_name, type, amount, description, status)
+       VALUES ($1, $2, 'bid_fee_paid', $3, $4, 'completed')`,
+      [userId, String(user.name), -fee, `Unlock entry fee for auction "${auction.title}"`]
+    );
+
+    await client.query('COMMIT');
+
+    const newBalance = Number(updatedRows.rows[0].wallet_balance);
+    res.json({
+      success: true,
+      message: `Auction unlocked successfully! Paid ${fee} ETB.`,
+      data: { unlocked: true, wallet_balance: newBalance }
+    });
+  } catch (err: any) {
+    await client.query('ROLLBACK');
+    console.error('[UNLOCK ERROR]', err.message, err.code);
+    res.status(500).json({
+      success: false,
+      message: `Unlock failed: ${err.message}`,
+      code: err.code
+    });
+  } finally {
+    client.release();
+  }
 }));
 
 // DELETE /api/auctions/:id — admin: delete auction
