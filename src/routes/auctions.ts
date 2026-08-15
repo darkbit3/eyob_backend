@@ -10,7 +10,14 @@ router.get('/', asyncHandler(async (req: Request, res: Response) => {
   const { status, category, search } = req.query;
 
   const rows = await query(
-    `SELECT a.*,
+    `SELECT a.id, a.product_id, a.title, a.description, a.image_url,
+            a.retail_value,
+            COALESCE(a.bid_per_cost, 100)      AS bid_per_cost,
+            a.category, a.status,
+            a.start_time, a.end_time,
+            a.min_bid, a.max_bid,
+            a.winner_id, a.winner_name, a.lowest_unique_bid,
+            a.closed_at, a.created_at, a.updated_at,
             p.name AS product_name,
             COUNT(DISTINCT b.id)::int          AS total_bids,
             COUNT(DISTINCT b.bidder_id)::int   AS total_participants
@@ -32,8 +39,15 @@ router.get('/', asyncHandler(async (req: Request, res: Response) => {
 // GET /api/auctions/:id — public: get single auction
 router.get('/:id', asyncHandler(async (req: Request, res: Response) => {
   const row = await queryOne(
-    `SELECT a.*,
-            p.name AS product_name,
+    `SELECT a.id, a.product_id, a.title, a.description, a.image_url,
+            a.retail_value,
+            COALESCE(a.bid_per_cost, 100)      AS bid_per_cost,
+            a.category, a.status,
+            a.start_time, a.end_time,
+            a.min_bid, a.max_bid,
+            a.winner_id, a.winner_name, a.lowest_unique_bid,
+            a.closed_at, a.created_at, a.updated_at,
+            p.name        AS product_name,
             p.description AS product_description,
             COUNT(DISTINCT b.id)::int          AS total_bids,
             COUNT(DISTINCT b.bidder_id)::int   AS total_participants
