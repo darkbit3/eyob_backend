@@ -25,14 +25,32 @@ router.get('/balance', authenticate, asyncHandler(async (req: Request, res: Resp
 // GET /api/wallet/transactions — returns transactions for logged-in user or admin
 router.get('/transactions', authenticate, asyncHandler(async (req: Request, res: Response) => {
   const user = (req as any).user;
-  const limitParam = Number(req.query.limit) || 20;
+  const limitParam = Number(req.query.limit) || 200;
 
-  if (user.role === 'admin') {
-    const rows = await query('SELECT * FROM transactions ORDER BY created_at DESC LIMIT $1', [limitParam]);
+  if (user.role === 'admin' || user.role === 'Super Admin' || user.role === 'Finance Admin') {
+    const rows = await query(
+      `SELECT t.*,
+              COALESCE(u.name, 'Admin')  AS user_name,
+              COALESCE(u.email, '')      AS user_email,
+              COALESCE(u.phone, '')      AS user_phone
+       FROM transactions t
+       LEFT JOIN users u ON u.id = t.user_id
+       ORDER BY t.created_at DESC
+       LIMIT $1`,
+      [limitParam]
+    );
     res.json({ success: true, data: rows });
   } else {
     const rows = await query(
-      'SELECT * FROM transactions WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2',
+      `SELECT t.*,
+              COALESCE(u.name, 'Customer') AS user_name,
+              COALESCE(u.email, '')        AS user_email,
+              COALESCE(u.phone, '')        AS user_phone
+       FROM transactions t
+       LEFT JOIN users u ON u.id = t.user_id
+       WHERE t.user_id = $1
+       ORDER BY t.created_at DESC
+       LIMIT $2`,
       [user.userId, limitParam]
     );
     res.json({ success: true, data: rows });

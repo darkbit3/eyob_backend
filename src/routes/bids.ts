@@ -130,9 +130,9 @@ router.post('/', authenticate, asyncHandler(async (req: Request, res: Response) 
 
   const amountNum = Number(amount);
 
-  // Fetch the auction
+  // Fetch the auction — include bid_per_cost
   const auction = await queryOne(
-    'SELECT id, status, min_bid, max_bid, title FROM auctions WHERE id = $1',
+    'SELECT id, status, min_bid, max_bid, title, bid_per_cost FROM auctions WHERE id = $1',
     [auction_id]
   );
   if (!auction) { res.status(404).json({ success: false, message: 'Auction not found' }); return; }
@@ -148,7 +148,9 @@ router.post('/', authenticate, asyncHandler(async (req: Request, res: Response) 
     return;
   }
 
-  // Fetch user and ensure wallet balance can cover the bid
+  const bidFee = Number(auction.bid_per_cost || 100); // cost per bid placement
+
+  // Fetch user and ensure wallet balance can cover the bid fee
   const user = await queryOne('SELECT id, wallet_balance, name FROM users WHERE id = $1', [userId]);
   if (!user) {
     res.status(404).json({ success: false, message: 'User not found' });
@@ -156,8 +158,11 @@ router.post('/', authenticate, asyncHandler(async (req: Request, res: Response) 
   }
 
   const walletBalance = Number(user.wallet_balance || 0);
-  if (walletBalance < amountNum) {
-    res.status(400).json({ success: false, message: 'Insufficient wallet balance. Please fund your wallet before bidding.' });
+  if (walletBalance < bidFee) {
+    res.status(400).json({
+      success: false,
+      message: `Insufficient wallet balance. You need ${bidFee} ETB to place a bid on this auction.`,
+    });
     return;
   }
 
@@ -172,13 +177,40 @@ router.post('/', authenticate, asyncHandler(async (req: Request, res: Response) 
     [auction_id, userId, maskedId, amountNum]
   );
 
-  // Deduct bid amount from wallet and log transaction
-  await query('UPDATE users SET wallet_balance = wallet_balance - $1, updated_at = NOW() WHERE id = $2', [amountNum, userId]);
+  // Deduct bid_per_cost (entry fee) from user wallet
+  await query(
+    'UPDATE users SET wallet_balance = wallet_balance - $1, updated_at = NOW() WHERE id = $2',
+    [bidFee, userId]
+  );
+
+  // Log user transaction — debit of bid fee
   await query(
     `INSERT INTO transactions (user_id, user_name, type, amount, description, status)
      VALUES ($1, $2, 'bid_placed', $3, $4, 'completed')`,
-    [userId, user.name as string, -amountNum, `Bid placed on ${auction.title}`]
+    [userId, user.name as string, -bidFee, `Bid fee for "${auction.title}" — bid amount: ${amountNum} ETB`]
   );
+
+  // Add bid_per_cost revenue to admin wallet (first admin found)
+  const admin = await queryOne(
+    `SELECT id, name FROM users WHERE role = 'admin' ORDER BY joined_at ASC LIMIT 1`
+  );
+  if (admin) {
+    await query(
+      'UPDATE users SET wallet_balance = wallet_balance + $1, updated_at = NOW() WHERE id = $2',
+      [bidFee, admin.id as string]
+    );
+    // Log admin revenue transaction
+    await query(
+      `INSERT INTO transactions (user_id, user_name, type, amount, description, status)
+       VALUES ($1, $2, 'credit_purchase', $3, $4, 'completed')`,
+      [
+        admin.id as string,
+        admin.name as string,
+        bidFee,
+        `Bid fee revenue from ${user.name as string} on "${auction.title}" — bid: ${amountNum} ETB`,
+      ]
+    );
+  }
 
   // Update auction totals
   await query(
