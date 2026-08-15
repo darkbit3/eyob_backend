@@ -218,6 +218,79 @@ router.patch('/:id/status', authenticate, requireAdmin, asyncHandler(async (req:
   res.json({ success: true, message: `Auction ${status}`, data: row });
 }));
 
+// GET /api/auctions/unlocked/my — customer: list unlocked auction IDs
+router.get('/unlocked/my', authenticate, asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req as any).user.userId;
+  const rows = await query(`SELECT auction_id FROM auction_unlocks WHERE user_id = $1`, [userId]);
+  const unlockedIds = rows.map((r: any) => r.auction_id);
+  res.json({ success: true, data: unlockedIds });
+}));
+
+// POST /api/auctions/:id/unlock — customer: pay bid per cost to unlock auction
+router.post('/:id/unlock', authenticate, asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req as any).user.userId;
+  const auctionId = req.params.id;
+
+  // Check if auction exists
+  const auction = await queryOne(`SELECT id, title, bid_per_cost, retail_value FROM auctions WHERE id = $1`, [auctionId]);
+  if (!auction) {
+    res.status(404).json({ success: false, message: 'Auction not found' });
+    return;
+  }
+
+  // Check if already unlocked
+  const existing = await queryOne(`SELECT 1 FROM auction_unlocks WHERE user_id = $1 AND auction_id = $2`, [userId, auctionId]);
+  if (existing) {
+    res.json({ success: true, message: 'Auction is already unlocked', data: { unlocked: true } });
+    return;
+  }
+
+  const fee = Number(auction.bid_per_cost || 100);
+
+  // Check user wallet balance
+  const user = await queryOne(`SELECT id, wallet_balance, name FROM users WHERE id = $1`, [userId]);
+  if (!user) {
+    res.status(404).json({ success: false, message: 'User not found' });
+    return;
+  }
+
+  const currentBalance = Number(user.wallet_balance || 0);
+  if (currentBalance < fee) {
+    res.status(400).json({
+      success: false,
+      message: `Insufficient balance (${currentBalance} ETB). ${fee} ETB required to unlock this auction.`
+    });
+    return;
+  }
+
+  // Deduct fee & record unlock
+  const updatedUser = await queryOne(
+    `UPDATE users SET wallet_balance = wallet_balance - $1, updated_at = NOW() WHERE id = $2 RETURNING wallet_balance`,
+    [fee, userId]
+  );
+
+  await query(
+    `INSERT INTO auction_unlocks (user_id, auction_id, amount_paid) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+    [userId, auctionId, fee]
+  );
+
+  // Record transaction
+  await query(
+    `INSERT INTO transactions (user_id, user_name, type, amount, description, status)
+     VALUES ($1, $2, 'bid_fee_paid', -$3, $4, 'completed')`,
+    [userId, user.name as string, fee, `Unlock entry fee for auction "${auction.title}"`]
+  );
+
+  res.json({
+    success: true,
+    message: `Auction unlocked successfully! Paid ${fee} ETB.`,
+    data: {
+      unlocked: true,
+      wallet_balance: updatedUser ? Number(updatedUser.wallet_balance) : Math.max(0, currentBalance - fee)
+    }
+  });
+}));
+
 // DELETE /api/auctions/:id — admin: delete auction
 router.delete('/:id', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   const row = await queryOne(

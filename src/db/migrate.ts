@@ -121,17 +121,26 @@ async function migrate() {
       id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       user_id        UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       user_name      VARCHAR(120)  NOT NULL,
-      type           VARCHAR(30)   NOT NULL
-                       CHECK (type IN ('credit_purchase','bid_placed','refund','winning_reward','manual_adjustment')),
+      type           VARCHAR(30)   NOT NULL,
       amount         NUMERIC(14,2) NOT NULL,
       description    TEXT,
-      status         VARCHAR(20)   NOT NULL DEFAULT 'completed'
-                       CHECK (status IN ('completed','pending','failed')),
+      status         VARCHAR(20)   NOT NULL DEFAULT 'completed',
       payment_method VARCHAR(40),
       created_at     TIMESTAMPTZ   NOT NULL DEFAULT NOW()
     )
   `);
   console.log('  ✓ transactions');
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS auction_unlocks (
+      user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      auction_id  UUID NOT NULL REFERENCES auctions(id) ON DELETE CASCADE,
+      amount_paid NUMERIC(10,2) NOT NULL,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (user_id, auction_id)
+    )
+  `);
+  console.log('  ✓ auction_unlocks');
 
   await query(`
     CREATE TABLE IF NOT EXISTS payment_queue (
