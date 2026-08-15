@@ -225,7 +225,11 @@ router.post('/', authenticate, asyncHandler(async (req: Request, res: Response) 
   // Re-compute winner state
   await computeLowestUniqueBid(auction_id);
 
-  res.status(201).json({ success: true, message: 'Bid placed successfully', data: bidRow });
+  res.status(201).json({
+    success: true,
+    message: `Bid placed successfully. ${bidFee} ETB bid fee deducted.`,
+    data: { ...bidRow, bid_fee: bidFee },
+  });
 }));
 
 // POST /api/bids/auction/:auctionId/finalize — admin: close auction & finalize winner
