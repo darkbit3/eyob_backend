@@ -21,6 +21,7 @@ import winnersRoutes      from './routes/winners';
 import reportsRoutes      from './routes/reports';
 
 import { warmPool } from './db/client';
+import { query as dbQuery } from './db/client';
 
 // Middleware imports
 import { errorHandler, notFound } from './middleware/errorHandler';
@@ -151,6 +152,16 @@ app.listen(PORT, async () => {
 
   // Warm the DB pool so the first request is instant
   await warmPool();
+
+  // ── Auto-migrate: add any missing columns safely on every boot ──────────
+  try {
+    await dbQuery(`ALTER TABLE products ADD COLUMN IF NOT EXISTS images JSONB NOT NULL DEFAULT '[]'::jsonb`);
+    await dbQuery(`ALTER TABLE auctions ADD COLUMN IF NOT EXISTS bid_per_cost NUMERIC(10,2) NOT NULL DEFAULT 100`);
+    await dbQuery(`ALTER TABLE users    ADD COLUMN IF NOT EXISTS credits INTEGER NOT NULL DEFAULT 0`);
+    console.log('  ✓ Auto-migration: columns verified');
+  } catch (e: any) {
+    console.warn('  ⚠ Auto-migration warning:', e.message);
+  }
 });
 
 export default app;
