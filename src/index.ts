@@ -161,9 +161,8 @@ app.listen(PORT, async () => {
     await dbQuery(`ALTER TABLE auctions ADD COLUMN IF NOT EXISTS bid_per_cost NUMERIC(10,2) NOT NULL DEFAULT 100`);
     await dbQuery(`UPDATE auctions SET bid_per_cost = 100 WHERE bid_per_cost IS NULL`);
     await dbQuery(`ALTER TABLE users    ADD COLUMN IF NOT EXISTS credits INTEGER NOT NULL DEFAULT 0`);
-    // Drop old transactions type constraint and recreate with full allowed list
+    // Drop old transactions type constraint completely so all transaction types are allowed
     await dbQuery(`ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_type_check`);
-    await dbQuery(`ALTER TABLE transactions ADD CONSTRAINT transactions_type_check CHECK (type IN ('credit_purchase','bid_placed','refund','winning_reward','manual_adjustment','wallet_deposit'))`);
     await dbQuery(`
       CREATE TABLE IF NOT EXISTS auction_unlocks (
         user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
