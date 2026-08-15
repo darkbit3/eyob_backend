@@ -9,8 +9,11 @@ const router = Router();
 router.get('/', asyncHandler(async (_req: Request, res: Response) => {
   const rows = await query(
     `SELECT p.*,
-            a.id     AS linked_auction_id,
-            a.status AS linked_auction_status
+            a.id         AS linked_auction_id,
+            a.status     AS linked_auction_status,
+            a.title      AS linked_auction_title,
+            a.end_time   AS linked_auction_end_time,
+            a.start_time AS linked_auction_start_time
      FROM products p
      LEFT JOIN auctions a ON a.product_id = p.id
      ORDER BY p.created_at DESC`
@@ -22,8 +25,11 @@ router.get('/', asyncHandler(async (_req: Request, res: Response) => {
 router.get('/:id', asyncHandler(async (req: Request, res: Response) => {
   const row = await queryOne(
     `SELECT p.*,
-            a.id     AS linked_auction_id,
-            a.status AS linked_auction_status
+            a.id         AS linked_auction_id,
+            a.status     AS linked_auction_status,
+            a.title      AS linked_auction_title,
+            a.end_time   AS linked_auction_end_time,
+            a.start_time AS linked_auction_start_time
      FROM products p
      LEFT JOIN auctions a ON a.product_id = p.id
      WHERE p.id = $1`,
