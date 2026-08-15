@@ -175,6 +175,31 @@ app.listen(PORT, async () => {
     // Drop payment_method check constraint completely so all payment methods (CBE, CBE Birr, Telebirr, Abyssinia, etc.) are allowed
     await dbQuery(`ALTER TABLE payment_queue DROP CONSTRAINT IF EXISTS payment_queue_payment_method_check`);
     await dbQuery(`ALTER TABLE payment_queue ALTER COLUMN payment_method TYPE VARCHAR(120)`);
+
+    // Create admin_bank_accounts table for managing official deposit accounts
+    await dbQuery(`
+      CREATE TABLE IF NOT EXISTS admin_bank_accounts (
+        id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        method_name    VARCHAR(120) NOT NULL,
+        account_number VARCHAR(100) NOT NULL,
+        account_holder VARCHAR(150) NOT NULL,
+        is_active      BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    const countRes = await dbQuery(`SELECT COUNT(*) AS cnt FROM admin_bank_accounts`);
+    if (Number((countRes as any)[0]?.cnt || 0) === 0) {
+      await dbQuery(`
+        INSERT INTO admin_bank_accounts (method_name, account_number, account_holder) VALUES
+        ('Commercial Bank of Ethiopia (CBE)', '1000 4829 10482', 'BidLow Auctions PLC (Admin Official)'),
+        ('CBE Birr', '1000 4829 10482', 'BidLow Auctions PLC (Admin Official)'),
+        ('Telebirr Transfer', '0911 002 233', 'BidLow Telebirr Merchant (Admin Official)'),
+        ('Bank of Abyssinia (Abyssinia)', '8492 1048 2011', 'BidLow Auctions PLC (Admin Official)'),
+        ('Dashen Bank / Amole', '0132 9845 2011', 'BidLow Auctions PLC (Admin Official)')
+      `);
+    }
     console.log('  ✓ Auto-migration: columns and tables verified');
   } catch (e: any) {
     console.warn('  ⚠ Auto-migration warning:', e.message);

@@ -57,4 +57,57 @@ router.patch('/', authenticate, requireAdmin, asyncHandler(async (req: Request, 
   res.json({ success: true, message: 'Settings updated', data: row });
 }));
 
+// ── Admin Official Bank Accounts & Deposit Methods ────────────────────────────
+
+// GET /api/settings/bank-accounts — Public & Admin get list of official admin bank accounts
+router.get('/bank-accounts', asyncHandler(async (_req: Request, res: Response) => {
+  const rows = await query('SELECT * FROM admin_bank_accounts ORDER BY created_at ASC');
+  res.json({ success: true, data: rows });
+}));
+
+// POST /api/settings/bank-accounts — Admin create new bank account
+router.post('/bank-accounts', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+  const { method_name, account_number, account_holder } = req.body;
+  if (!method_name || !account_number || !account_holder) {
+    res.status(400).json({ success: false, message: 'method_name, account_number, and account_holder are required' });
+    return;
+  }
+  const row = await queryOne(
+    `INSERT INTO admin_bank_accounts (method_name, account_number, account_holder)
+     VALUES ($1, $2, $3)
+     RETURNING *`,
+    [method_name, account_number, account_holder]
+  );
+  res.status(201).json({ success: true, message: 'Official bank account added successfully!', data: row });
+}));
+
+// PUT /api/settings/bank-accounts/:id — Admin update bank account
+router.put('/bank-accounts/:id', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { method_name, account_number, account_holder, is_active } = req.body;
+  const row = await queryOne(
+    `UPDATE admin_bank_accounts SET
+       method_name    = COALESCE($1, method_name),
+       account_number = COALESCE($2, account_number),
+       account_holder = COALESCE($3, account_holder),
+       is_active      = COALESCE($4, is_active),
+       updated_at     = NOW()
+     WHERE id = $5
+     RETURNING *`,
+    [method_name || null, account_number || null, account_holder || null, is_active !== undefined ? is_active : null, id]
+  );
+  if (!row) {
+    res.status(404).json({ success: false, message: 'Bank account not found' });
+    return;
+  }
+  res.json({ success: true, message: 'Bank account updated successfully!', data: row });
+}));
+
+// DELETE /api/settings/bank-accounts/:id — Admin delete bank account
+router.delete('/bank-accounts/:id', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  await query('DELETE FROM admin_bank_accounts WHERE id = $1', [id]);
+  res.json({ success: true, message: 'Bank account deleted successfully!' });
+}));
+
 export default router;
