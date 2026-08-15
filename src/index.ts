@@ -172,9 +172,9 @@ app.listen(PORT, async () => {
         PRIMARY KEY (user_id, auction_id)
       )
     `);
-    // Also ensure payment_method constraint in payment_queue allows Chapa
+    // Drop payment_method check constraint completely so all payment methods (CBE, CBE Birr, Telebirr, Abyssinia, etc.) are allowed
     await dbQuery(`ALTER TABLE payment_queue DROP CONSTRAINT IF EXISTS payment_queue_payment_method_check`);
-    await dbQuery(`ALTER TABLE payment_queue ADD CONSTRAINT payment_queue_payment_method_check CHECK (payment_method IN ('Telebirr','CBE Birr','Bank Transfer','Chapa','Manual Bank Transfer','Chapa Digital'))`);
+    await dbQuery(`ALTER TABLE payment_queue ALTER COLUMN payment_method TYPE VARCHAR(120)`);
     console.log('  ✓ Auto-migration: columns and tables verified');
   } catch (e: any) {
     console.warn('  ⚠ Auto-migration warning:', e.message);

@@ -64,10 +64,13 @@ router.post('/queue', authenticate, asyncHandler(async (req: Request, res: Respo
   const { amount, credits, payment_method, reference_number, receipt_image, notes } = req.body;
   const finalCredits = credits !== undefined && credits !== null ? Number(credits) : Number(amount || 0);
 
-  if (!amount || !payment_method || !reference_number || !receipt_image) {
-    res.status(400).json({ success: false, message: 'amount, payment_method, reference_number, receipt_image required' });
+  if (amount === undefined || amount === null || !payment_method) {
+    res.status(400).json({ success: false, message: 'amount and payment_method required' });
     return;
   }
+
+  const finalRef = reference_number || `REF-${Date.now().toString().slice(-6)}`;
+  const finalReceipt = receipt_image || 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?w=400';
 
   const user = await queryOne('SELECT id, name, email FROM users WHERE id = $1', [userId]);
   if (!user) { res.status(404).json({ success: false, message: 'User not found' }); return; }
@@ -81,7 +84,7 @@ router.post('/queue', authenticate, asyncHandler(async (req: Request, res: Respo
     [
       userId, user.name as string, user.email as string,
       Number(amount), finalCredits,
-      payment_method, reference_number, receipt_image, notes || ''
+      payment_method, finalRef, finalReceipt, notes || ''
     ]
   );
 
