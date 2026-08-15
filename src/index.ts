@@ -161,7 +161,22 @@ app.listen(PORT, async () => {
     await dbQuery(`ALTER TABLE auctions ADD COLUMN IF NOT EXISTS bid_per_cost NUMERIC(10,2) NOT NULL DEFAULT 100`);
     await dbQuery(`UPDATE auctions SET bid_per_cost = 100 WHERE bid_per_cost IS NULL`);
     await dbQuery(`ALTER TABLE users    ADD COLUMN IF NOT EXISTS credits INTEGER NOT NULL DEFAULT 0`);
-    console.log('  ✓ Auto-migration: columns verified');
+    // Drop old transactions type constraint and recreate with full allowed list
+    await dbQuery(`ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_type_check`);
+    await dbQuery(`ALTER TABLE transactions ADD CONSTRAINT transactions_type_check CHECK (type IN ('credit_purchase','bid_placed','refund','winning_reward','manual_adjustment','wallet_deposit'))`);
+    await dbQuery(`
+      CREATE TABLE IF NOT EXISTS auction_unlocks (
+        user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        auction_id  UUID NOT NULL REFERENCES auctions(id) ON DELETE CASCADE,
+        amount_paid NUMERIC(10,2) NOT NULL DEFAULT 0,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (user_id, auction_id)
+      )
+    `);
+    // Also ensure payment_method constraint in payment_queue allows Chapa
+    await dbQuery(`ALTER TABLE payment_queue DROP CONSTRAINT IF EXISTS payment_queue_payment_method_check`);
+    await dbQuery(`ALTER TABLE payment_queue ADD CONSTRAINT payment_queue_payment_method_check CHECK (payment_method IN ('Telebirr','CBE Birr','Bank Transfer','Chapa','Manual Bank Transfer','Chapa Digital'))`);
+    console.log('  ✓ Auto-migration: columns and tables verified');
   } catch (e: any) {
     console.warn('  ⚠ Auto-migration warning:', e.message);
   }

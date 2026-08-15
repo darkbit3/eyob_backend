@@ -236,7 +236,7 @@ router.post('/:id/unlock', authenticate, asyncHandler(async (req: Request, res: 
     CREATE TABLE IF NOT EXISTS auction_unlocks (
       user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       auction_id  UUID NOT NULL REFERENCES auctions(id) ON DELETE CASCADE,
-      amount_paid NUMERIC(10,2) NOT NULL,
+      amount_paid NUMERIC(10,2) NOT NULL DEFAULT 0,
       created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       PRIMARY KEY (user_id, auction_id)
     )
@@ -306,8 +306,19 @@ router.post('/:id/unlock', authenticate, asyncHandler(async (req: Request, res: 
 
     await client.query(
       `INSERT INTO transactions (user_id, user_name, type, amount, description, status)
-       VALUES ($1, $2, 'bid_fee_paid', $3, $4, 'completed')`,
+       VALUES ($1, $2, 'bid_placed', $3, $4, 'completed')`,
       [userId, String(user.name), -fee, `Unlock entry fee for auction "${auction.title}"`]
+    );
+
+    // Notify user
+    await client.query(
+      `INSERT INTO notifications (user_id, type, title, message)
+       VALUES ($1, 'auction_started', $2, $3)`,
+      [
+        userId,
+        '🔓 Auction Unlocked!',
+        `You've unlocked "${auction.title}" for ${fee} ETB. You can now place bids.`
+      ]
     );
 
     await client.query('COMMIT');
