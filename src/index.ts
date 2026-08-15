@@ -27,7 +27,11 @@ import { query as dbQuery } from './db/client';
 // Middleware imports
 import { errorHandler, notFound } from './middleware/errorHandler';
 
+import http from 'http';
+import { setupWebSocket } from './ws/server';
+
 const app = express();
+const server = http.createServer(app);
 const PORT = Number(process.env.PORT) || 3000;
 
 // ── Security & Logging ──────────────────────────────────────────────────────
@@ -134,7 +138,9 @@ app.use(notFound);
 app.use(errorHandler);
 
 // ── Start Server ──────────────────────────────────────────────────────────────
-app.listen(PORT, async () => {
+setupWebSocket(server);
+
+server.listen(PORT, async () => {
   console.log('\n ╔════════════════════════════════════════════╗');
   console.log(' ║  BidLow Backend API — Server Started       ║');
   console.log(' ╚════════════════════════════════════════════╝');

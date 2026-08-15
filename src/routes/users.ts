@@ -202,6 +202,18 @@ router.patch('/:id/wallet', authenticate, requireAdmin, asyncHandler(async (req:
     ]
   );
 
+  // Real-time WebSocket event to target user and admin
+  try {
+    const { sendToUser } = await import('../ws/server');
+    sendToUser(req.params.id, {
+      type: 'balance_updated',
+      wallet_balance: Number(updatedUser.wallet_balance || 0),
+      credits: Number(updatedUser.credits || 0),
+      amount: numAmount,
+      reason,
+    });
+  } catch (_e) {}
+
   res.json({
     success: true,
     message: numAmount < 0 ? 'Wallet withdrawal processed successfully' : 'Wallet deposit processed successfully',

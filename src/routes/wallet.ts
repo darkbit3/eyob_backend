@@ -226,26 +226,37 @@ router.patch('/queue/:id/approve', authenticate, requireAdmin, asyncHandler(asyn
     );
   }
 
-  // Audit log
-  await query(
-    `INSERT INTO audit_logs (admin_id, admin_name, action, target, details, ip_address)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
-    [
-      adminId,
-      adminName,
-      isWithdrawal ? 'Approved Withdrawal' : 'Approved Payment',
-      `${item.user_name} (${item.reference_number})`,
-      `Amount: ${numAmt} ETB via ${item.payment_method}`,
-      req.ip || '0.0.0.0'
-    ]
-  );
+    // Audit log
+    await query(
+      `INSERT INTO audit_logs (admin_id, admin_name, action, target, details, ip_address)
+       VALUES ($1, $2, 'Approved Payment Queue Item', $3, $4, $5)`,
+      [
+        adminId,
+        adminName,
+        `${item.user_name} (${item.user_id})`,
+        `Approved ${item.payment_method} ${isWithdrawal ? 'withdrawal' : 'deposit'} of ${numAmt} ETB (Ref: ${item.reference_number}).`,
+        req.ip || '0.0.0.0'
+      ]
+    );
 
-  res.json({
-    success: true,
-    message: isWithdrawal
-      ? `Withdrawal approved — ${numAmt} ETB processed for ${item.user_name}`
-      : `Deposit approved — ${numAmt} ETB credited to ${item.user_name}`
-  });
+    // Push real-time balance update over WebSocket to the customer
+    try {
+      const userRow = await queryOne('SELECT wallet_balance, credits FROM users WHERE id = $1', [item.user_id as string]);
+      const { sendToUser } = await import('../ws/server');
+      sendToUser(item.user_id as string, {
+        type: 'balance_updated',
+        wallet_balance: Number(userRow?.wallet_balance || 0),
+        credits: Number(userRow?.credits || 0),
+        amount: isWithdrawal ? -numAmt : numAmt,
+        payment_method: item.payment_method,
+      });
+    } catch (_e) {}
+
+    res.json({
+      success: true,
+      message: `Payment request of ${numAmt} ETB approved & credited successfully!`,
+      data: item,
+    });
 }));
 
 // PATCH /api/wallet/queue/:id/reject — admin: reject payment or withdrawal

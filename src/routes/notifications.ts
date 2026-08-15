@@ -5,17 +5,54 @@ import { asyncHandler } from '../middleware/errorHandler';
 
 const router = Router();
 
-// GET /api/notifications/my — customer: get own notifications
+// GET /api/notifications/my — customer: get own notifications (with auto-concluded auction notifications)
 router.get('/my', authenticate, asyncHandler(async (req: Request, res: Response) => {
   const userId = (req as any).user.userId;
-  const limit = Math.min(parseInt(req.query.limit as string) || 50, 100); // Max 100
+  const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+
+  // ── Auto-generate notifications for ended auctions where user bid ──────────
+  try {
+    const endedAuctions = await query(
+      `SELECT DISTINCT a.id, a.title, a.status, a.winner_id, a.winner_name, a.lowest_unique_bid
+       FROM bids b
+       JOIN auctions a ON a.id = b.auction_id
+       WHERE b.bidder_id = $1
+         AND a.status = 'closed'`,
+      [userId]
+    );
+
+    for (const a of endedAuctions) {
+      // Check if user already got a notification for this ended auction
+      const notifExists = await query(
+        `SELECT id FROM notifications
+         WHERE user_id = $1
+           AND (title ILIKE '%' || $2 || '%' OR message ILIKE '%' || $2 || '%')`,
+        [userId, a.title as string]
+      );
+
+      if (notifExists.length === 0) {
+        const isWinner = a.winner_id === userId;
+        const notifTitle = isWinner ? `🏆 You Won "${a.title}"!` : `🏁 Auction Ended: "${a.title}"`;
+        const notifMsg = isWinner
+          ? `Congratulations! You won "${a.title}" with a lowest unique bid of ${a.lowest_unique_bid || 0} ETB.`
+          : `The auction "${a.title}" has concluded. Winner: ${a.winner_name || 'Anonymous bidder'} with a winning bid of ${a.lowest_unique_bid || '—'} ETB.`;
+
+        await query(
+          `INSERT INTO notifications (user_id, type, title, message, is_read)
+           VALUES ($1, $2, $3, $4, FALSE)`,
+          [userId, isWinner ? 'winner_announced' : 'winner_announced', notifTitle, notifMsg]
+        );
+      }
+    }
+  } catch (_e) {
+    // Non-blocking
+  }
+
   const rows = await query(
     'SELECT id, type, title, message, is_read, created_at FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2',
     [userId, limit]
   );
   
-  // Add cache headers: revalidate after 10 seconds
-  res.set('Cache-Control', 'private, max-age=10');
   res.json({ success: true, data: rows });
 }));
 
