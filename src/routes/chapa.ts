@@ -58,27 +58,49 @@ router.post('/initialize', authenticate, asyncHandler(async (req: Request, res: 
   const firstName = nameParts[0] || 'Customer';
   const lastName  = nameParts.slice(1).join(' ') || 'User';
 
+  // ── Normalize phone to Chapa format: 09xxxxxxxx or 07xxxxxxxx ───────────
+  // DB stores phone as e.g. "+251912345678" or "0912345678"
+  const rawPhone = (user.phone as string) ?? '';
+  const digitsOnly = rawPhone.replace(/\D/g, ''); // strip non-digits
+  let chapaPhone = '';
+  if (digitsOnly.startsWith('251') && digitsOnly.length === 12) {
+    // +251912345678 → 0912345678
+    chapaPhone = '0' + digitsOnly.slice(3);
+  } else if (digitsOnly.startsWith('0') && digitsOnly.length === 10) {
+    // already 0912345678
+    chapaPhone = digitsOnly;
+  } else if (digitsOnly.length === 9) {
+    // 912345678 → 0912345678
+    chapaPhone = '0' + digitsOnly;
+  } else {
+    // fallback — omit phone so Chapa doesn't reject
+    chapaPhone = '';
+  }
   // Call Chapa initialize API
+  const chapaBody: Record<string, string> = {
+    amount: String(amt),
+    currency: 'ETB',
+    email: user.email as string,
+    first_name: firstName,
+    last_name: lastName,
+    tx_ref: txRef,
+    callback_url: CALLBACK_URL,
+    return_url: `${RETURN_URL}?tx_ref=${txRef}&status=success`,
+    'customization[title]': 'BidLow Wallet Top-Up',
+    'customization[description]': `Deposit ${amt} ETB to your BidLow auction wallet`,
+  };
+  // Only include phone_number if it's valid 10-digit Ethiopian format (09xx or 07xx)
+  if (chapaPhone.length === 10 && (chapaPhone.startsWith('09') || chapaPhone.startsWith('07'))) {
+    chapaBody['phone_number'] = chapaPhone;
+  }
+
   const chapaRes = await fetch(`${CHAPA_API}/transaction/initialize`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${CHAPA_SECRET}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      amount: String(amt),
-      currency: 'ETB',
-      email: user.email as string,
-      first_name: firstName,
-      last_name: lastName,
-      phone_number: (user.phone as string)?.replace(/\D/g, '').slice(-10) || '',
-      tx_ref: txRef,
-      callback_url: CALLBACK_URL,
-      return_url: `${RETURN_URL}?tx_ref=${txRef}&status=success`,
-      'customization[title]': 'BidLow Wallet Top-Up',
-      'customization[description]': `Deposit ${amt} ETB to your BidLow auction wallet`,
-      'meta[hide_receipt]': 'false',
-    }),
+    body: JSON.stringify(chapaBody),
   });
 
   if (!chapaRes.ok) {
