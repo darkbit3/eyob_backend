@@ -60,12 +60,19 @@ router.get('/auction/:auctionId', authenticate, asyncHandler(async (req: Request
   const isAdmin = user.role === 'admin';
 
   const rows = await query(
-    `SELECT b.id, b.auction_id, b.masked_bidder_id,
-            ${isAdmin ? 'b.bidder_id,' : ''}
-            b.amount, b.is_duplicate, b.is_lowest_unique, b.created_at
-     FROM bids b
-     WHERE b.auction_id = $1
-     ORDER BY b.amount ASC, b.created_at ASC`,
+    isAdmin
+      ? `SELECT b.id, b.auction_id, b.bidder_id, b.masked_bidder_id,
+                b.amount, b.is_duplicate, b.is_lowest_unique, b.created_at,
+                u.name AS bidder_name, u.phone AS bidder_phone, u.photo_url AS bidder_photo
+         FROM bids b
+         LEFT JOIN users u ON u.id = b.bidder_id
+         WHERE b.auction_id = $1
+         ORDER BY b.amount ASC, b.created_at ASC`
+      : `SELECT b.id, b.auction_id, b.masked_bidder_id,
+                b.amount, b.is_duplicate, b.is_lowest_unique, b.created_at
+         FROM bids b
+         WHERE b.auction_id = $1
+         ORDER BY b.amount ASC, b.created_at ASC`,
     [req.params.auctionId]
   );
 
