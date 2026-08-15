@@ -306,7 +306,7 @@ router.post('/:id/unlock', authenticate, asyncHandler(async (req: Request, res: 
 
     await client.query(
       `INSERT INTO transactions (user_id, user_name, type, amount, description, status)
-       VALUES ($1, $2, 'bid_placed', $3, $4, 'completed')`,
+       VALUES ($1, $2, 'bid_fee_paid', $3, $4, 'completed')`,
       [userId, String(user.name), -fee, `Unlock entry fee for auction "${auction.title}"`]
     );
 
