@@ -156,8 +156,8 @@ router.patch('/:id/wallet', authenticate, requireAdmin, asyncHandler(async (req:
 
   if (!updatedUser) { res.status(404).json({ success: false, message: 'User not found' }); return; }
 
-  // Log transaction
-  const txType = numAmount < 0 ? 'manual_withdrawal' : 'manual_adjustment';
+  // Log transaction — use only allowed type values
+  const txType = 'manual_adjustment';
   const desc = numAmount < 0
     ? `Admin manual withdrawal: ${reason}`
     : `Admin manual deposit (${type}): ${reason}`;
@@ -168,8 +168,12 @@ router.patch('/:id/wallet', authenticate, requireAdmin, asyncHandler(async (req:
     [req.params.id, updatedUser.name as string, txType, numAmount, desc]
   );
 
-  // Update admin/platform wallet: when admin credits a user (+numAmount) deduct from admin; when admin withdraws (-numAmount) add to admin balance!
-  if (type === 'wallet') {
+  // Update admin/platform wallet:
+  // When admin credits ANOTHER user (+amount): deduct from admin
+  // When admin withdraws from ANOTHER user (-amount): add to admin
+  // When admin adjusts their OWN wallet: skip this (already updated above)
+  const targetIsAdmin = req.params.id === (req as any).user.userId;
+  if (type === 'wallet' && !targetIsAdmin) {
     try {
       await query(
         `UPDATE users SET
