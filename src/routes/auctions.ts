@@ -10,13 +10,18 @@ router.get('/', asyncHandler(async (req: Request, res: Response) => {
   const { status, category, search } = req.query;
 
   const rows = await query(
-    `SELECT a.*, p.name AS product_name
+    `SELECT a.*,
+            p.name AS product_name,
+            COUNT(DISTINCT b.id)::int          AS total_bids,
+            COUNT(DISTINCT b.bidder_id)::int   AS total_participants
      FROM auctions a
      LEFT JOIN products p ON p.id = a.product_id
+     LEFT JOIN bids     b ON b.auction_id = a.id
      WHERE
        ($1::text IS NULL OR a.status = $1)
        AND ($2::text IS NULL OR a.category = $2)
        AND ($3::text IS NULL OR a.title ILIKE '%' || $3 || '%')
+     GROUP BY a.id, p.name
      ORDER BY a.created_at DESC`,
     [status ? String(status) : null, category ? String(category) : null, search ? String(search) : null]
   );
@@ -27,10 +32,16 @@ router.get('/', asyncHandler(async (req: Request, res: Response) => {
 // GET /api/auctions/:id — public: get single auction
 router.get('/:id', asyncHandler(async (req: Request, res: Response) => {
   const row = await queryOne(
-    `SELECT a.*, p.name AS product_name, p.description AS product_description
+    `SELECT a.*,
+            p.name AS product_name,
+            p.description AS product_description,
+            COUNT(DISTINCT b.id)::int          AS total_bids,
+            COUNT(DISTINCT b.bidder_id)::int   AS total_participants
      FROM auctions a
      LEFT JOIN products p ON p.id = a.product_id
-     WHERE a.id = $1`,
+     LEFT JOIN bids     b ON b.auction_id = a.id
+     WHERE a.id = $1
+     GROUP BY a.id, p.name, p.description`,
     [req.params.id]
   );
   if (!row) { res.status(404).json({ success: false, message: 'Auction not found' }); return; }
