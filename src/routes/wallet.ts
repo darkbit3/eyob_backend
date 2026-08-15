@@ -62,9 +62,10 @@ router.get('/queue', authenticate, requireAdmin, asyncHandler(async (_req: Reque
 router.post('/queue', authenticate, asyncHandler(async (req: Request, res: Response) => {
   const userId = (req as any).user.userId;
   const { amount, credits, payment_method, reference_number, receipt_image, notes } = req.body;
+  const finalCredits = credits !== undefined && credits !== null ? Number(credits) : Number(amount || 0);
 
-  if (!amount || !credits || !payment_method || !reference_number || !receipt_image) {
-    res.status(400).json({ success: false, message: 'amount, credits, payment_method, reference_number, receipt_image required' });
+  if (!amount || !payment_method || !reference_number || !receipt_image) {
+    res.status(400).json({ success: false, message: 'amount, payment_method, reference_number, receipt_image required' });
     return;
   }
 
@@ -79,7 +80,7 @@ router.post('/queue', authenticate, asyncHandler(async (req: Request, res: Respo
      RETURNING *`,
     [
       userId, user.name as string, user.email as string,
-      Number(amount), Number(credits),
+      Number(amount), finalCredits,
       payment_method, reference_number, receipt_image, notes || ''
     ]
   );
