@@ -117,33 +117,58 @@ router.patch('/:id/wallet', authenticate, requireAdmin, asyncHandler(async (req:
     return;
   }
 
+  const numAmount = Number(amount);
+  const targetUser = await queryOne(`SELECT id, name, wallet_balance, credits FROM users WHERE id = $1`, [req.params.id]);
+  if (!targetUser) {
+    res.status(404).json({ success: false, message: 'User not found' });
+    return;
+  }
+
+  // Check sufficient user balance if withdrawing
+  if (type === 'wallet' && numAmount < 0) {
+    const currentBalance = Number(targetUser.wallet_balance || 0);
+    const withdrawAmount = Math.abs(numAmount);
+    if (currentBalance < withdrawAmount) {
+      res.status(400).json({
+        success: false,
+        message: `Insufficient user wallet balance (${currentBalance} ETB available). Cannot withdraw ${withdrawAmount} ETB.`
+      });
+      return;
+    }
+  }
+
   let updatedUser;
   if (type === 'credits') {
     updatedUser = await queryOne(
       `UPDATE users SET credits = GREATEST(0, credits + $1), updated_at = NOW()
        WHERE id = $2
        RETURNING id, name, wallet_balance, credits`,
-      [Number(amount), req.params.id]
+      [numAmount, req.params.id]
     );
   } else {
     updatedUser = await queryOne(
       `UPDATE users SET wallet_balance = GREATEST(0, wallet_balance + $1), updated_at = NOW()
        WHERE id = $2
        RETURNING id, name, wallet_balance, credits`,
-      [Number(amount), req.params.id]
+      [numAmount, req.params.id]
     );
   }
 
   if (!updatedUser) { res.status(404).json({ success: false, message: 'User not found' }); return; }
 
   // Log transaction
+  const txType = numAmount < 0 ? 'manual_withdrawal' : 'manual_adjustment';
+  const desc = numAmount < 0
+    ? `Admin manual withdrawal: ${reason}`
+    : `Admin manual deposit (${type}): ${reason}`;
+
   await query(
     `INSERT INTO transactions (user_id, user_name, type, amount, description, status)
-     VALUES ($1, $2, 'manual_adjustment', $3, $4, 'completed')`,
-    [req.params.id, updatedUser.name as string, Number(amount), `Admin manual adjustment (${type}): ${reason}`]
+     VALUES ($1, $2, $3, $4, $5, 'completed')`,
+    [req.params.id, updatedUser.name as string, txType, numAmount, desc]
   );
 
-  // Update admin/platform wallet: when admin credits a user (amount > 0) deduct from admin; when admin withdraws (amount < 0) add to admin
+  // Update admin/platform wallet: when admin credits a user (+numAmount) deduct from admin; when admin withdraws (-numAmount) add to admin balance!
   if (type === 'wallet') {
     try {
       await query(
@@ -151,7 +176,7 @@ router.patch('/:id/wallet', authenticate, requireAdmin, asyncHandler(async (req:
            wallet_balance = GREATEST(0, wallet_balance - $1),
            updated_at = NOW()
          WHERE id = $2`,
-        [Number(amount), (req as any).user.userId]
+        [numAmount, (req as any).user.userId]
       );
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
@@ -162,17 +187,22 @@ router.patch('/:id/wallet', authenticate, requireAdmin, asyncHandler(async (req:
   const adminId = (req as any).user.userId;
   await query(
     `INSERT INTO audit_logs (admin_id, admin_name, action, target, details, ip_address)
-     VALUES ($1, $2, 'Manual Wallet Adjustment', $3, $4, $5)`,
+     VALUES ($1, $2, $3, $4, $5, $6)`,
     [
       adminId,
       (req as any).user.email,
+      numAmount < 0 ? 'Manual Wallet Withdrawal' : 'Manual Wallet Deposit',
       `${updatedUser.name} (${req.params.id})`,
-      `Adjusted ${amount > 0 ? '+' : ''}${amount} ${type}. Reason: ${reason}`,
+      `Adjusted ${numAmount > 0 ? '+' : ''}${numAmount} ${type}. Reason: ${reason}`,
       req.ip || '0.0.0.0'
     ]
   );
 
-  res.json({ success: true, message: 'Wallet adjusted', data: updatedUser });
+  res.json({
+    success: true,
+    message: numAmount < 0 ? 'Wallet withdrawal processed successfully' : 'Wallet deposit processed successfully',
+    data: updatedUser
+  });
 }));
 
 // POST /api/users/:id/reset-password — admin: set a temporary password for user
