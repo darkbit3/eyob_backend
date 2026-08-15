@@ -43,17 +43,24 @@ router.get('/:id', asyncHandler(async (req: Request, res: Response) => {
 router.post('/', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   const { name, category, image_url, images, retail_value, description } = req.body;
 
-  if (!name || !category || (!image_url && (!images || !Array.isArray(images) || images.length === 0)) || !retail_value) {
-    res.status(400).json({ success: false, message: 'name, category, images (or image_url), retail_value are required' });
+  if (!name || !category || !retail_value) {
+    res.status(400).json({ success: false, message: 'name, category, retail_value are required' });
     return;
   }
 
-  // prefer `images` array; fallback to single `image_url`
-  const imgs = Array.isArray(images) && images.length ? images : [image_url];
+  // Build images array — accept array or single image_url
+  const imgs: string[] = Array.isArray(images) && images.length
+    ? images.filter((i: any) => typeof i === 'string' && i.trim() !== '')
+    : image_url ? [image_url] : [];
+
+  if (imgs.length === 0) {
+    res.status(400).json({ success: false, message: 'At least one image URL is required' });
+    return;
+  }
 
   const row = await queryOne(
     `INSERT INTO products (name, category, image_url, images, retail_value, description)
-     VALUES ($1, $2, $3, $4, $5, $6)
+     VALUES ($1, $2, $3, $4::jsonb, $5, $6)
      RETURNING *`,
     [name, category, imgs[0], JSON.stringify(imgs), Number(retail_value), description || '']
   );
@@ -72,15 +79,20 @@ router.post('/', authenticate, requireAdmin, asyncHandler(async (req: Request, r
 router.patch('/:id', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   const { name, category, image_url, images, retail_value, description } = req.body;
 
-  // If images provided as array, convert to JSON
-  const imagesJson = Array.isArray(images) ? JSON.stringify(images) : null;
+  // Build clean images array if provided
+  const imgs: string[] | null = Array.isArray(images) && images.length
+    ? images.filter((i: any) => typeof i === 'string' && i.trim() !== '')
+    : null;
+
+  const imagesJson = imgs ? JSON.stringify(imgs) : null;
+  const primaryImage = imgs ? imgs[0] : (image_url || null);
 
   const row = await queryOne(
     `UPDATE products SET
        name         = COALESCE($1, name),
        category     = COALESCE($2, category),
        image_url    = COALESCE($3, image_url),
-       images       = COALESCE($4, images),
+       images       = COALESCE($4::jsonb, images),
        retail_value = COALESCE($5, retail_value),
        description  = COALESCE($6, description),
        updated_at   = NOW()
@@ -89,11 +101,11 @@ router.patch('/:id', authenticate, requireAdmin, asyncHandler(async (req: Reques
     [
       name || null,
       category || null,
-      image_url || (images && images.length ? images[0] : null),
-      imagesJson ? imagesJson : null,
+      primaryImage,
+      imagesJson,
       retail_value ? Number(retail_value) : null,
-      description || null,
-      req.params.id
+      description !== undefined ? description : null,
+      req.params.id,
     ]
   );
   if (!row) { res.status(404).json({ success: false, message: 'Product not found' }); return; }
