@@ -30,11 +30,10 @@ router.post('/initialize', authenticate, asyncHandler(async (req: Request, res: 
   const txRef = `BIDLOW-${userId.slice(0, 8)}-${Date.now()}`;
 
   // Store pending record in payment_queue so we can track it
-  await queryOne(
+  await query(
     `INSERT INTO payment_queue
        (user_id, user_name, user_email, amount, credits, payment_method, reference_number, receipt_image, notes)
-     VALUES ($1, $2, $3, $4, $5, 'Chapa', $6, '', $7)
-     ON CONFLICT DO NOTHING`,
+     VALUES ($1, $2, $3, $4, $5, 'Chapa', $6, '', $7)`,
     [
       userId,
       user.name as string,
@@ -42,7 +41,7 @@ router.post('/initialize', authenticate, asyncHandler(async (req: Request, res: 
       amt,
       amt,
       txRef,
-      `Chapa payment initialized — awaiting confirmation`,
+      'Chapa payment initialized — awaiting confirmation',
     ]
   );
 
