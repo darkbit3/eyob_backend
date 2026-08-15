@@ -144,10 +144,17 @@ router.patch('/:id', authenticate, requireAdmin, asyncHandler(async (req: Reques
      WHERE id = $12
      RETURNING *`,
     [
-      title || null, description || null, image_url || null,
-      retail_value ? Number(retail_value) : null, bid_per_cost ? Number(bid_per_cost) : null, category || null,
-      status || null, start_time || null, end_time || null,
-      min_bid ? Number(min_bid) : null, max_bid ? Number(max_bid) : null,
+      title || null,
+      description || null,
+      image_url || null,
+      retail_value !== undefined && retail_value !== null ? Number(retail_value) : null,
+      bid_per_cost !== undefined && bid_per_cost !== null ? Number(bid_per_cost) : null,
+      category || null,
+      status || null,
+      start_time || null,
+      end_time || null,
+      min_bid !== undefined && min_bid !== null ? Number(min_bid) : null,
+      max_bid !== undefined && max_bid !== null ? Number(max_bid) : null,
       req.params.id
     ]
   );
