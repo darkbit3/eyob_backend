@@ -163,6 +163,8 @@ app.listen(PORT, async () => {
     await dbQuery(`ALTER TABLE users    ADD COLUMN IF NOT EXISTS credits INTEGER NOT NULL DEFAULT 0`);
     // Drop old transactions type constraint completely so all transaction types are allowed
     await dbQuery(`ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_type_check`);
+    // Add auction_id to transactions for per-auction profit tracking
+    await dbQuery(`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS auction_id UUID`);
     await dbQuery(`
       CREATE TABLE IF NOT EXISTS auction_unlocks (
         user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,

@@ -87,4 +87,105 @@ router.get('/dashboard', authenticate, requireAdmin, asyncHandler(async (_req: R
   });
 }));
 
+// GET /api/reports/profit — per-auction profit breakdown + platform summary
+// Query params: status, date_from, date_to
+router.get('/profit', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+  const { status, date_from, date_to } = req.query as Record<string, string>;
+
+  // Build WHERE clause dynamically
+  const conditions: string[] = [];
+  const params: any[] = [];
+
+  if (status && status !== 'all') {
+    params.push(status);
+    conditions.push(`a.status = $${params.length}`);
+  }
+  if (date_from) {
+    params.push(date_from);
+    conditions.push(`a.created_at >= $${params.length}`);
+  }
+  if (date_to) {
+    params.push(date_to);
+    conditions.push(`a.created_at <= ($${params.length}::date + interval '1 day')`);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  // Per-auction profit rows
+  const auctionRows = await query(
+    `SELECT
+       a.id,
+       a.title,
+       a.category,
+       a.status,
+       a.image_url  AS image,
+       a.retail_value,
+       a.bid_per_cost,
+       a.total_bids,
+       a.total_participants,
+       a.start_time,
+       a.end_time,
+       a.created_at,
+       a.lowest_unique_bid,
+       a.winner_id,
+       u.name AS winner_name,
+       COALESCE((SELECT SUM(ABS(t.amount))
+                 FROM transactions t
+                 WHERE t.auction_id = a.id AND t.type = 'bid_placed'
+                ), 0)                                              AS total_bid_amount,
+       COALESCE(a.bid_per_cost, 0) * COALESCE(a.total_bids, 0)   AS total_bid_per_cost_revenue,
+       (COALESCE(a.bid_per_cost, 0) * COALESCE(a.total_bids, 0))
+         - COALESCE(a.retail_value, 0)                            AS admin_gain
+     FROM auctions a
+     LEFT JOIN users u ON u.id = a.winner_id
+     ${where}
+     ORDER BY a.created_at DESC`,
+    params
+  );
+
+  // Platform-level summary (respecting same date filters but ignoring status filter)
+  const summaryConditions: string[] = [];
+  const summaryParams: any[] = [];
+  if (date_from) { summaryParams.push(date_from); summaryConditions.push(`created_at >= $${summaryParams.length}`); }
+  if (date_to)   { summaryParams.push(date_to);   summaryConditions.push(`created_at <= ($${summaryParams.length}::date + interval '1 day')`); }
+  const txWhere = summaryConditions.length > 0 ? `WHERE ${summaryConditions.join(' AND ')}` : '';
+
+  const summaryRow = await queryOne(
+    `SELECT
+       COALESCE(SUM(CASE WHEN type IN ('credit_purchase','wallet_deposit','manual_adjustment') AND amount > 0 THEN amount ELSE 0 END), 0)  AS total_deposits,
+       COALESCE(SUM(CASE WHEN type = 'manual_adjustment' AND amount < 0 THEN ABS(amount) ELSE 0 END), 0)                                  AS total_withdrawals,
+       COALESCE(SUM(CASE WHEN type = 'bid_placed' THEN ABS(amount) ELSE 0 END), 0)                                                        AS total_bid_amount
+     FROM transactions ${txWhere}`,
+    summaryParams
+  );
+
+  const auctionSummary = await queryOne(
+    `SELECT
+       COUNT(*)                                                                              AS auction_count,
+       COALESCE(SUM(retail_value), 0)                                                       AS total_retail_value,
+       COALESCE(SUM(COALESCE(bid_per_cost,0) * COALESCE(total_bids,0)), 0)                 AS total_bid_fee_revenue
+     FROM auctions ${where}`,
+    params
+  );
+
+  const totalBidFeeRevenue = Number(auctionSummary?.total_bid_fee_revenue || 0);
+  const totalWithdrawals   = Number(summaryRow?.total_withdrawals || 0);
+
+  res.json({
+    success: true,
+    data: {
+      auctions: auctionRows,
+      summary: {
+        auction_count:         Number(auctionSummary?.auction_count || 0),
+        total_retail_value:    Number(auctionSummary?.total_retail_value || 0),
+        total_bid_fee_revenue: totalBidFeeRevenue,
+        total_bid_amount:      Number(summaryRow?.total_bid_amount || 0),
+        total_deposits:        Number(summaryRow?.total_deposits || 0),
+        total_withdrawals:     totalWithdrawals,
+        net_profit:            totalBidFeeRevenue - totalWithdrawals,
+      },
+    },
+  });
+}));
+
 export default router;
