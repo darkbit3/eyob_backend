@@ -38,28 +38,31 @@ const PORT = Number(process.env.PORT) || 3000;
 app.use(helmet());
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
-// ── CORS — allow both frontend (5173) and admin (5174) ─────────────────────
+// ── CORS — allow frontend, admin, render, and vercel domains ───────────────
 const allowedOrigins = [
   process.env.FRONTEND_URL ?? 'https://eyob-z2xx.onrender.com',
   process.env.ADMIN_URL ?? 'https://eyob-admin.onrender.com',
   process.env.BACKEND_URL ?? 'https://eyob-backend.onrender.com',
   'https://eyob-z2xx.onrender.com',
   'https://eyob-admin.onrender.com',
+  'https://eyob-admin.vercel.app',
+  'https://eyob-topaz.vercel.app',
 ];
+
+// Helper to check if origin is allowed (supports exact match and vercel.app preview domains)
+const isAllowedOrigin = (origin?: string): boolean => {
+  if (!origin) return true;
+  if (allowedOrigins.some(o => o && origin.replace(/\/$/, '') === o.replace(/\/$/, ''))) return true;
+  if (/^https:\/\/.*\.vercel\.app$/.test(origin)) return true;
+  if (/^https:\/\/.*\.onrender\.com$/.test(origin)) return true;
+  return false;
+};
 
 // CORS: reflect allowed origins and handle preflight explicitly.
 const corsOptionsDelegate = (origin: string | undefined, callback: (err: Error | null, allow?: boolean | string) => void) => {
-  // Log origin for debugging deploy-time CORS issues
-  console.log('CORS origin:', origin);
-  if (!origin) {
-    // No origin (e.g., curl, same-origin) — allow
-    return callback(null, true);
+  if (!origin || isAllowedOrigin(origin)) {
+    return callback(null, origin || true);
   }
-  if (allowedOrigins.includes(origin)) {
-    // Reflect the origin
-    return callback(null, origin);
-  }
-  // Not allowed
   console.warn(`CORS blocked origin: ${origin}`);
   return callback(null, false);
 };
@@ -72,7 +75,7 @@ app.options('*', cors({ origin: corsOptionsDelegate, credentials: true }));
 // Fallback: explicitly set CORS headers on all responses and handle preflight
 app.use((req, res, next) => {
   const origin = req.headers.origin as string | undefined;
-  if (origin && allowedOrigins.includes(origin)) {
+  if (origin && isAllowedOrigin(origin)) {
     res.header('Access-Control-Allow-Origin', origin);
   }
   res.header('Access-Control-Allow-Credentials', 'true');
