@@ -310,6 +310,28 @@ router.post('/:id/unlock', authenticate, asyncHandler(async (req: Request, res: 
       [userId, String(user.name), -fee, `Unlock entry fee for auction "${auction.title}"`]
     );
 
+    // Credit admin wallet with the unlock entry fee
+    const adminRes = await client.query(
+      `SELECT id, name FROM users WHERE role = 'admin' ORDER BY joined_at ASC LIMIT 1`
+    );
+    const admin = adminRes.rows[0];
+    if (admin) {
+      await client.query(
+        `UPDATE users SET wallet_balance = wallet_balance + $1, updated_at = NOW() WHERE id = $2`,
+        [fee, admin.id]
+      );
+      await client.query(
+        `INSERT INTO transactions (user_id, user_name, type, amount, description, status)
+         VALUES ($1, $2, 'credit_purchase', $3, $4, 'completed')`,
+        [
+          admin.id,
+          admin.name,
+          fee,
+          `Unlock entry fee revenue from ${user.name} for "${auction.title}" (+${fee} ETB)`
+        ]
+      );
+    }
+
     // Notify user
     await client.query(
       `INSERT INTO notifications (user_id, type, title, message)
@@ -324,6 +346,25 @@ router.post('/:id/unlock', authenticate, asyncHandler(async (req: Request, res: 
     await client.query('COMMIT');
 
     const newBalance = Number(updatedRows.rows[0].wallet_balance);
+
+    // Push real-time balance update over WebSocket
+    try {
+      const { sendToUser } = await import('../ws/server');
+      sendToUser(userId, {
+        type: 'balance_updated',
+        wallet_balance: newBalance,
+        amount: -fee,
+      });
+      if (admin) {
+        const updatedAdmin = await queryOne('SELECT wallet_balance, credits FROM users WHERE id = $1', [admin.id]);
+        sendToUser(admin.id, {
+          type: 'balance_updated',
+          wallet_balance: Number(updatedAdmin?.wallet_balance || 0),
+          amount: fee,
+        });
+      }
+    } catch (_e) {}
+
     res.json({
       success: true,
       message: `Auction unlocked successfully! Paid ${fee} ETB.`,

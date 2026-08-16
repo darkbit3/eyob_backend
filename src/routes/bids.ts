@@ -148,9 +148,7 @@ router.post('/', authenticate, asyncHandler(async (req: Request, res: Response) 
     return;
   }
 
-  const bidFee = Number(auction.bid_per_cost || 100); // cost per bid placement
-
-  // Fetch user and ensure wallet balance can cover the bid fee
+  // Fetch user and ensure wallet balance can cover the bid amount
   const user = await queryOne('SELECT id, wallet_balance, name FROM users WHERE id = $1', [userId]);
   if (!user) {
     res.status(404).json({ success: false, message: 'User not found' });
@@ -158,10 +156,10 @@ router.post('/', authenticate, asyncHandler(async (req: Request, res: Response) 
   }
 
   const walletBalance = Number(user.wallet_balance || 0);
-  if (walletBalance < bidFee) {
+  if (walletBalance < amountNum) {
     res.status(400).json({
       success: false,
-      message: `Insufficient wallet balance. You need ${bidFee} ETB to place a bid on this auction.`,
+      message: `Insufficient wallet balance. You need ${amountNum} ETB to place this bid.`,
     });
     return;
   }
@@ -177,27 +175,32 @@ router.post('/', authenticate, asyncHandler(async (req: Request, res: Response) 
     [auction_id, userId, maskedId, amountNum]
   );
 
-  // Deduct bid_per_cost (entry fee) from user wallet
+  // Deduct exact bid amount from user wallet
   await query(
-    'UPDATE users SET wallet_balance = wallet_balance - $1, updated_at = NOW() WHERE id = $2',
-    [bidFee, userId]
+    'UPDATE users SET wallet_balance = GREATEST(0, wallet_balance - $1), updated_at = NOW() WHERE id = $2',
+    [amountNum, userId]
   );
 
-  // Log user transaction — debit of bid fee
+  // Log user transaction — debit of exact bid amount
   await query(
     `INSERT INTO transactions (user_id, user_name, type, amount, description, status)
      VALUES ($1, $2, 'bid_placed', $3, $4, 'completed')`,
-    [userId, user.name as string, -bidFee, `Bid fee for "${auction.title}" — bid amount: ${amountNum} ETB`]
+    [
+      userId,
+      user.name as string,
+      -amountNum,
+      `Bid placed on "${auction.title}" — ${amountNum} ETB`
+    ]
   );
 
-  // Add bid_per_cost revenue to admin wallet (first admin found)
+  // Add exact bid amount revenue to admin wallet (first admin found)
   const admin = await queryOne(
     `SELECT id, name FROM users WHERE role = 'admin' ORDER BY joined_at ASC LIMIT 1`
   );
   if (admin) {
     await query(
       'UPDATE users SET wallet_balance = wallet_balance + $1, updated_at = NOW() WHERE id = $2',
-      [bidFee, admin.id as string]
+      [amountNum, admin.id as string]
     );
     // Log admin revenue transaction
     await query(
@@ -206,8 +209,8 @@ router.post('/', authenticate, asyncHandler(async (req: Request, res: Response) 
       [
         admin.id as string,
         admin.name as string,
-        bidFee,
-        `Bid fee revenue from ${user.name as string} on "${auction.title}" — bid: ${amountNum} ETB`,
+        amountNum,
+        `Bid revenue from ${user.name as string} on "${auction.title}" — bid: ${amountNum} ETB (+${amountNum} ETB)`,
       ]
     );
   }
@@ -225,10 +228,31 @@ router.post('/', authenticate, asyncHandler(async (req: Request, res: Response) 
   // Re-compute winner state
   await computeLowestUniqueBid(auction_id);
 
+  // Push real-time WebSocket balance updates
+  try {
+    const { sendToUser } = await import('../ws/server');
+    const updatedUser = await queryOne('SELECT wallet_balance, credits FROM users WHERE id = $1', [userId]);
+    sendToUser(userId, {
+      type: 'balance_updated',
+      wallet_balance: Number(updatedUser?.wallet_balance || 0),
+      credits: Number(updatedUser?.credits || 0),
+      amount: -amountNum,
+    });
+    if (admin) {
+      const updatedAdmin = await queryOne('SELECT wallet_balance, credits FROM users WHERE id = $1', [admin.id as string]);
+      sendToUser(admin.id as string, {
+        type: 'balance_updated',
+        wallet_balance: Number(updatedAdmin?.wallet_balance || 0),
+        credits: Number(updatedAdmin?.credits || 0),
+        amount: amountNum,
+      });
+    }
+  } catch (_e) {}
+
   res.status(201).json({
     success: true,
-    message: `Bid placed successfully. ${bidFee} ETB bid fee deducted.`,
-    data: { ...bidRow, bid_fee: bidFee },
+    message: `Bid placed successfully! ${amountNum} ETB deducted.`,
+    data: { ...bidRow, amount: amountNum },
   });
 }));
 
