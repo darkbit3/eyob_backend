@@ -2,7 +2,7 @@
 import multer from 'multer';
 import { v2 as cloudinary } from 'cloudinary';
 import { authenticate, requireAdmin } from '../middleware/auth';
-import { asyncHandler } from '../utils/asyncHandler';
+import { asyncHandler } from '../middleware/errorHandler';
 
 // Configure Cloudinary
 cloudinary.config({
@@ -60,3 +60,4 @@ router.post(
 );
 
 export default router;
+
