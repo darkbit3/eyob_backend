@@ -161,6 +161,26 @@ server.listen(PORT, async () => {
   console.log(`    GET   /api/reports/dashboard`);
   console.log(`    GET   /api/audit\n`);
 
+  // ── Auto-close expired auctions every 60 seconds ─────────────────────────
+  async function autoCloseExpiredAuctions() {
+    try {
+      const expired = await dbQuery<{ id: string; title: string }>(
+        `UPDATE auctions
+         SET status = 'closed', closed_at = NOW(), updated_at = NOW()
+         WHERE status = 'active' AND end_time < NOW()
+         RETURNING id, title`
+      );
+      if (expired.length > 0) {
+        console.log(`  ⏱  Auto-closed ${expired.length} expired auction(s):`, expired.map((a: any) => a.title).join(', '));
+      }
+    } catch (e: any) {
+      console.warn('  ⚠ Auto-close job error:', e.message);
+    }
+  }
+  // Run once on startup, then every 60 seconds
+  await autoCloseExpiredAuctions();
+  setInterval(autoCloseExpiredAuctions, 60_000);
+
   // Warm the DB pool so the first request is instant
   await warmPool();
 
