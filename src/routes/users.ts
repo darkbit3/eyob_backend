@@ -39,8 +39,10 @@ router.get('/me', authenticate, asyncHandler(async (req: Request, res: Response)
   res.json({ success: true, data: user });
 }));
 
-// GET /api/users/:id — admin: get specific user
+// GET /api/users/:id — admin: get specific user with real database bids and transactions
 router.get('/:id', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.params.id;
+
   const user = await queryOne(
     `SELECT u.id, u.name, u.email, u.phone, u.photo_url, u.role, u.status,
             u.wallet_balance, u.credits, u.joined_at,
@@ -49,10 +51,49 @@ router.get('/:id', authenticate, requireAdmin, asyncHandler(async (req: Request,
      LEFT JOIN user_won_auctions uwa ON uwa.user_id = u.id
      WHERE u.id = $1
      GROUP BY u.id`,
-    [req.params.id]
+    [userId]
   );
   if (!user) { res.status(404).json({ success: false, message: 'User not found' }); return; }
-  res.json({ success: true, data: user });
+
+  // Fetch real database bids placed by this user
+  const userBids = await query(
+    `SELECT b.id, b.auction_id, b.amount, b.is_duplicate, b.is_lowest_unique, b.created_at,
+            a.title AS auction_title, a.status AS auction_status, a.image_url AS auction_image
+     FROM bids b
+     LEFT JOIN auctions a ON a.id = b.auction_id
+     WHERE b.bidder_id = $1
+     ORDER BY b.created_at DESC`,
+    [userId]
+  );
+
+  // Fetch real database transactions for this user
+  const userTx = await query(
+    `SELECT id, type, amount, description, status, payment_method, created_at
+     FROM transactions
+     WHERE user_id = $1
+     ORDER BY created_at DESC`,
+    [userId]
+  );
+
+  // Fetch unlocked auctions for this user
+  const unlockedAuctions = await query(
+    `SELECT u.auction_id, u.amount_paid, u.created_at, a.title AS auction_title
+     FROM auction_unlocks u
+     LEFT JOIN auctions a ON a.id = u.auction_id
+     WHERE u.user_id = $1
+     ORDER BY u.created_at DESC`,
+    [userId]
+  );
+
+  res.json({
+    success: true,
+    data: {
+      ...user,
+      bids: userBids,
+      transactions: userTx,
+      unlocked_auctions: unlockedAuctions,
+    },
+  });
 }));
 
 // PATCH /api/users/:id/status — admin: suspend or activate user

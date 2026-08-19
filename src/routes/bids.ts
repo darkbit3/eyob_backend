@@ -280,11 +280,12 @@ router.post('/auction/:auctionId/finalize', authenticate, requireAdmin, asyncHan
 
     // Send winner notification
     await query(
-      `INSERT INTO notifications (user_id, type, title, message)
-       VALUES ($1, 'winner_announced', 'You Won an Auction! 🏆', $2)`,
+      `INSERT INTO notifications (user_id, type, title, message, metadata)
+       VALUES ($1, 'winner_announced', 'You Won an Auction! 🏆', $2, $3)`,
       [
         winnerId,
-        `Congratulations! You won "${auction.title as string}" with a lowest unique bid of ${lowestUniqueAmt} ETB.`
+        `Congratulations! You won "${auction.title as string}" with a lowest unique bid of ${lowestUniqueAmt} ETB.`,
+        JSON.stringify({ auction_id: auctionId, auction_title: auction.title, bid_amount: lowestUniqueAmt, retail_value: auction.retail_value }),
       ]
     );
   }
