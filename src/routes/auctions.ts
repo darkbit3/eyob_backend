@@ -15,7 +15,10 @@ router.get('/', asyncHandler(async (req: Request, res: Response) => {
             COALESCE(a.bid_per_cost, 100)      AS bid_per_cost,
             a.category, a.status,
             a.start_time, a.end_time,
-            a.min_bid, a.max_bid, a.max_bids_per_user,
+              a.min_bid, a.max_bid, a.max_bids_per_user,
+              CASE WHEN COALESCE(a.max_bids_per_user, 0) > 0 THEN a.max_bids_per_user
+                ELSE COALESCE((SELECT max_bids_per_user FROM system_settings LIMIT 1), 0)
+              END AS effective_max_bids_per_user,
             a.winner_id, a.winner_name, a.lowest_unique_bid,
             a.closed_at, a.created_at, a.updated_at,
             p.name AS product_name,
@@ -44,7 +47,10 @@ router.get('/:id', asyncHandler(async (req: Request, res: Response) => {
             COALESCE(a.bid_per_cost, 100)      AS bid_per_cost,
             a.category, a.status,
             a.start_time, a.end_time,
-            a.min_bid, a.max_bid, a.max_bids_per_user,
+              a.min_bid, a.max_bid, a.max_bids_per_user,
+              CASE WHEN COALESCE(a.max_bids_per_user, 0) > 0 THEN a.max_bids_per_user
+                ELSE COALESCE((SELECT max_bids_per_user FROM system_settings LIMIT 1), 0)
+              END AS effective_max_bids_per_user,
             a.winner_id, a.winner_name, a.lowest_unique_bid,
             a.closed_at, a.created_at, a.updated_at,
             p.name        AS product_name,
