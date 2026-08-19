@@ -42,6 +42,7 @@ async function migrate() {
       min_bid_price            NUMERIC(10,2) NOT NULL DEFAULT 1,
       max_bid_price            NUMERIC(10,2) NOT NULL DEFAULT 5000,
       default_bid_step         NUMERIC(10,2) NOT NULL DEFAULT 1,
+      max_bids_per_user        INTEGER       NOT NULL DEFAULT 0,
       auto_winner_verification BOOLEAN       NOT NULL DEFAULT TRUE,
       maintenance_mode         BOOLEAN       NOT NULL DEFAULT FALSE,
       updated_at               TIMESTAMPTZ   NOT NULL DEFAULT NOW()
@@ -97,6 +98,7 @@ async function migrate() {
 
   // Add bid_per_cost column if it doesn't exist
   await query(`ALTER TABLE auctions ADD COLUMN IF NOT EXISTS bid_per_cost NUMERIC(10,2) NOT NULL DEFAULT 100`);
+  await query(`ALTER TABLE auctions ADD COLUMN IF NOT EXISTS max_bids_per_user INTEGER NOT NULL DEFAULT 0`);
 
   await query(`
     CREATE TABLE IF NOT EXISTS bids (

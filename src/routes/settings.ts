@@ -41,7 +41,7 @@ router.patch('/', authenticate, requireAdmin, asyncHandler(async (req: Request, 
       default_bid_step != null ? Number(default_bid_step) : null,
       auto_winner_verification != null ? Boolean(auto_winner_verification) : null,
       maintenance_mode != null ? Boolean(maintenance_mode) : null,
-      max_bids_per_user != null ? Number(max_bids_per_user) : null,
+      max_bids_per_user != null ? Math.max(0, Math.floor(Number(max_bids_per_user) || 0)) : null,
     ]
   );
 

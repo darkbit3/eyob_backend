@@ -15,7 +15,7 @@ router.get('/', asyncHandler(async (req: Request, res: Response) => {
             COALESCE(a.bid_per_cost, 100)      AS bid_per_cost,
             a.category, a.status,
             a.start_time, a.end_time,
-            a.min_bid, a.max_bid,
+            a.min_bid, a.max_bid, a.max_bids_per_user,
             a.winner_id, a.winner_name, a.lowest_unique_bid,
             a.closed_at, a.created_at, a.updated_at,
             p.name AS product_name,
@@ -44,7 +44,7 @@ router.get('/:id', asyncHandler(async (req: Request, res: Response) => {
             COALESCE(a.bid_per_cost, 100)      AS bid_per_cost,
             a.category, a.status,
             a.start_time, a.end_time,
-            a.min_bid, a.max_bid,
+            a.min_bid, a.max_bid, a.max_bids_per_user,
             a.winner_id, a.winner_name, a.lowest_unique_bid,
             a.closed_at, a.created_at, a.updated_at,
             p.name        AS product_name,
@@ -66,7 +66,7 @@ router.get('/:id', asyncHandler(async (req: Request, res: Response) => {
 router.post('/', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   const {
     product_id, title, description, image_url, retail_value, bid_per_cost,
-    category, status = 'draft', start_time, end_time, min_bid, max_bid,
+    max_bids_per_user, category, status = 'draft', start_time, end_time, min_bid, max_bid,
   } = req.body;
 
   if (!title || !image_url || !retail_value || !category || !start_time || !end_time) {
@@ -76,13 +76,14 @@ router.post('/', authenticate, requireAdmin, asyncHandler(async (req: Request, r
 
   const row = await queryOne(
     `INSERT INTO auctions
-       (product_id, title, description, image_url, retail_value, bid_per_cost, category, status, start_time, end_time, min_bid, max_bid)
+       (product_id, title, description, image_url, retail_value, bid_per_cost, max_bids_per_user, category, status, start_time, end_time, min_bid, max_bid)
      VALUES
-       ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
      RETURNING *`,
     [
       product_id || null, title, description || '', image_url,
-      Number(retail_value), Number(bid_per_cost) || 100, category, status,
+      Number(retail_value), Number(bid_per_cost) || 100,
+      Math.max(0, Math.floor(Number(max_bids_per_user) || 0)), category, status,
       start_time, end_time, Number(min_bid) || 1, Number(max_bid) || 500
     ]
   );
@@ -123,7 +124,7 @@ router.post('/', authenticate, requireAdmin, asyncHandler(async (req: Request, r
 // PATCH /api/auctions/:id — admin: update auction fields
 router.patch('/:id', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   const {
-    title, description, image_url, retail_value, bid_per_cost, category,
+    title, description, image_url, retail_value, bid_per_cost, max_bids_per_user, category,
     status, start_time, end_time, min_bid, max_bid,
   } = req.body;
 
@@ -134,14 +135,15 @@ router.patch('/:id', authenticate, requireAdmin, asyncHandler(async (req: Reques
        image_url    = COALESCE($3, image_url),
        retail_value = COALESCE($4, retail_value),
        bid_per_cost = COALESCE($5, bid_per_cost),
-       category     = COALESCE($6, category),
-       status       = COALESCE($7, status),
-       start_time   = COALESCE($8, start_time),
-       end_time     = COALESCE($9, end_time),
-       min_bid      = COALESCE($10, min_bid),
-       max_bid      = COALESCE($11, max_bid),
+       max_bids_per_user = COALESCE($6, max_bids_per_user),
+       category     = COALESCE($7, category),
+       status       = COALESCE($8, status),
+       start_time   = COALESCE($9, start_time),
+       end_time     = COALESCE($10, end_time),
+       min_bid      = COALESCE($11, min_bid),
+       max_bid      = COALESCE($12, max_bid),
        updated_at   = NOW()
-     WHERE id = $12
+     WHERE id = $13
      RETURNING *`,
     [
       title || null,
@@ -149,6 +151,7 @@ router.patch('/:id', authenticate, requireAdmin, asyncHandler(async (req: Reques
       image_url || null,
       retail_value !== undefined && retail_value !== null ? Number(retail_value) : null,
       bid_per_cost !== undefined && bid_per_cost !== null ? Number(bid_per_cost) : null,
+      max_bids_per_user !== undefined && max_bids_per_user !== null ? Math.max(0, Math.floor(Number(max_bids_per_user) || 0)) : null,
       category || null,
       status || null,
       start_time || null,

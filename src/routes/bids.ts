@@ -123,7 +123,7 @@ router.post('/', authenticate, asyncHandler(async (req: Request, res: Response) 
 
   // Fetch the auction — include bid_per_cost
   const auction = await queryOne(
-    'SELECT id, status, min_bid, max_bid, title, bid_per_cost FROM auctions WHERE id = $1',
+    'SELECT id, status, min_bid, max_bid, title, bid_per_cost, max_bids_per_user FROM auctions WHERE id = $1',
     [auction_id]
   );
   if (!auction) { res.status(404).json({ success: false, message: 'Auction not found' }); return; }
@@ -157,7 +157,9 @@ router.post('/', authenticate, asyncHandler(async (req: Request, res: Response) 
 
   // Enforce max bids per user per auction from system_settings
   const settingsRow = await queryOne('SELECT max_bids_per_user FROM system_settings LIMIT 1');
-  const maxBidsPerUser = Number(settingsRow?.max_bids_per_user ?? 0);
+  const auctionLimit = Number(auction.max_bids_per_user ?? 0);
+  const globalLimit = Number(settingsRow?.max_bids_per_user ?? 0);
+  const maxBidsPerUser = auctionLimit > 0 ? auctionLimit : globalLimit;
   if (maxBidsPerUser > 0) {
     const userBidCount = await queryOne(
       'SELECT COUNT(*)::int AS cnt FROM bids WHERE auction_id = $1 AND bidder_id = $2',
