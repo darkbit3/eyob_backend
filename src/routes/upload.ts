@@ -28,6 +28,23 @@ const upload = multer({
 
 const router = Router();
 
+async function uploadImage(buffer: Buffer, folder: string) {
+  return new Promise<{ secure_url: string }>((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder,
+        resource_type: 'image',
+        transformation: [{ quality: 'auto', fetch_format: 'auto' }],
+      },
+      (error, result) => {
+        if (error || !result) return reject(error || new Error('Upload failed'));
+        resolve(result as { secure_url: string });
+      }
+    );
+    stream.end(buffer);
+  });
+}
+
 // POST /api/upload - admin only
 router.post(
   '/',
@@ -40,21 +57,23 @@ router.post(
       return;
     }
 
-    const result = await new Promise<{ secure_url: string }>((resolve, reject) => {
-      const stream = cloudinary.uploader.upload_stream(
-        {
-          folder: 'bidlow',
-          resource_type: 'image',
-          transformation: [{ quality: 'auto', fetch_format: 'auto' }],
-        },
-        (error, result) => {
-          if (error || !result) return reject(error || new Error('Upload failed'));
-          resolve(result as { secure_url: string });
-        }
-      );
-      stream.end(req.file!.buffer);
-    });
+    const result = await uploadImage(req.file.buffer, 'bidlow');
 
+    res.json({ success: true, data: { url: result.secure_url } });
+  })
+);
+
+// POST /api/upload/receipt - authenticated customer receipt upload
+router.post(
+  '/receipt',
+  authenticate,
+  upload.single('file'),
+  asyncHandler(async (req: Request, res: Response) => {
+    if (!req.file) {
+      res.status(400).json({ success: false, message: 'No receipt image provided.' });
+      return;
+    }
+    const result = await uploadImage(req.file.buffer, 'bidlow/receipts');
     res.json({ success: true, data: { url: result.secure_url } });
   })
 );
