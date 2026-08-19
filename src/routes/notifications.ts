@@ -37,10 +37,14 @@ router.get('/my', authenticate, asyncHandler(async (req: Request, res: Response)
           ? `Congratulations! You won "${a.title}" with a lowest unique bid of ${a.lowest_unique_bid || 0} ETB.`
           : `The auction "${a.title}" has concluded. Winner: ${a.winner_name || 'Anonymous bidder'} with a winning bid of ${a.lowest_unique_bid || '—'} ETB.`;
 
+        const metadata = isWinner
+          ? JSON.stringify({ auction_id: a.id, auction_title: a.title, bid_amount: a.lowest_unique_bid })
+          : null;
+
         await query(
-          `INSERT INTO notifications (user_id, type, title, message, is_read)
-           VALUES ($1, $2, $3, $4, FALSE)`,
-          [userId, isWinner ? 'winner_announced' : 'winner_announced', notifTitle, notifMsg]
+          `INSERT INTO notifications (user_id, type, title, message, is_read, metadata)
+           VALUES ($1, $2, $3, $4, FALSE, $5)`,
+          [userId, isWinner ? 'winner_announced' : 'auction_ending', notifTitle, notifMsg, metadata]
         );
       }
     }
@@ -49,7 +53,7 @@ router.get('/my', authenticate, asyncHandler(async (req: Request, res: Response)
   }
 
   const rows = await query(
-    'SELECT id, type, title, message, is_read, created_at FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2',
+    'SELECT id, type, title, message, is_read, metadata, created_at FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2',
     [userId, limit]
   );
   
