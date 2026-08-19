@@ -28,10 +28,11 @@ router.post('/create', authenticate, requireAdmin, asyncHandler(async (req: Requ
     res.status(400).json({ success: false, message: 'name, email, phone, password are required' });
     return;
   }
-  if (!['admin', 'customer'].includes(role)) {
-    res.status(400).json({ success: false, message: 'role must be admin or customer' });
-    return;
-  }
+
+  // Sanitize role — allow admin/customer/any custom string up to 30 chars
+  const finalRole = ['admin', 'customer'].includes(role)
+    ? role
+    : String(role).toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 30) || 'customer';
 
   // Check duplicates
   const exists = await queryOne(
@@ -49,14 +50,14 @@ router.post('/create', authenticate, requireAdmin, asyncHandler(async (req: Requ
     `INSERT INTO users (name, email, phone, password_hash, role)
      VALUES ($1, $2, $3, $4, $5)
      RETURNING id, name, email, phone, role, status, wallet_balance, joined_at`,
-    [name, email, phone, hash, role]
+    [name, email, phone, hash, finalRole]
   );
 
   const adminId = (req as any).user.userId;
   await query(
     `INSERT INTO audit_logs (admin_id, admin_name, action, target, details, ip_address)
      VALUES ($1, $2, 'Created User', $3, $4, $5)`,
-    [adminId, (req as any).user.email, `${name} (${email})`, `Role: ${role}`, req.ip || '0.0.0.0']
+    [adminId, (req as any).user.email, `${name} (${email})`, `Role: ${finalRole}`, req.ip || '0.0.0.0']
   );
 
   res.status(201).json({ success: true, message: `User ${name} created successfully.`, data: user });
