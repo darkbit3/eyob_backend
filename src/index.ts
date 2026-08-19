@@ -20,6 +20,7 @@ import settingsRoutes     from './routes/settings';
 import winnersRoutes      from './routes/winners';
 import reportsRoutes      from './routes/reports';
 import chapaRoutes        from './routes/chapa';
+import uploadRoutes       from './routes/upload';
 
 import { warmPool } from './db/client';
 import { query as dbQuery } from './db/client';
@@ -135,6 +136,7 @@ app.use('/api/settings',      settingsRoutes);
 app.use('/api/winners',       winnersRoutes);
 app.use('/api/reports',       reportsRoutes);
 app.use('/api/wallet/chapa',  chapaRoutes);
+app.use('/api/upload',        uploadRoutes);
 
 // ── 404 & Error Handlers ──────────────────────────────────────────────────────
 app.use(notFound);

@@ -12,8 +12,9 @@
     "db:seed": "ts-node src/db/seed.ts"
   },
   "dependencies": {
-    "pg": "^8.12.0",
+    "@types/multer": "^2.2.0",
     "bcryptjs": "^2.4.3",
+    "cloudinary": "^2.10.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
@@ -21,6 +22,8 @@
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",
+    "multer": "^2.2.0",
+    "pg": "^8.12.0",
     "uuid": "^10.0.0",
     "ws": "^8.17.1"
   },
