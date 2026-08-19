@@ -266,6 +266,75 @@ router.post('/', authenticate, asyncHandler(async (req: Request, res: Response) 
   });
 }));
 
+// PATCH /api/bids/:bidId — customer: edit own bid while auction is active
+router.patch('/:bidId', authenticate, asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req as any).user.userId;
+  const amountNum = Number(req.body.amount);
+  if (!Number.isFinite(amountNum) || amountNum <= 0) {
+    res.status(400).json({ success: false, message: 'A valid bid amount is required' });
+    return;
+  }
+
+  const bid = await queryOne(
+    `SELECT b.id, b.auction_id, b.bidder_id, b.amount, a.status, a.min_bid, a.max_bid, a.title
+     FROM bids b JOIN auctions a ON a.id = b.auction_id WHERE b.id = $1`,
+    [req.params.bidId]
+  );
+  if (!bid) { res.status(404).json({ success: false, message: 'Bid not found' }); return; }
+  if (bid.bidder_id !== userId) { res.status(403).json({ success: false, message: 'You can only edit your own bid' }); return; }
+  if (bid.status !== 'active') { res.status(400).json({ success: false, message: 'Bids can only be edited while the auction is active' }); return; }
+  if (amountNum < Number(bid.min_bid) || amountNum > Number(bid.max_bid)) {
+    res.status(400).json({ success: false, message: `Bid amount must be between ${bid.min_bid} and ${bid.max_bid} ETB` });
+    return;
+  }
+
+  const oldAmount = Number(bid.amount);
+  const difference = amountNum - oldAmount;
+  if (difference > 0) {
+    const user = await queryOne('SELECT wallet_balance FROM users WHERE id = $1', [userId]);
+    if (Number(user?.wallet_balance ?? 0) < difference) {
+      res.status(400).json({ success: false, message: `Insufficient wallet balance. You need ${difference} ETB more to edit this bid.` });
+      return;
+    }
+  }
+
+  const updated = await queryOne(
+    'UPDATE bids SET amount = $1, is_duplicate = FALSE, is_lowest_unique = FALSE WHERE id = $2 RETURNING *',
+    [amountNum, req.params.bidId]
+  );
+  await query('UPDATE users SET wallet_balance = wallet_balance - $1, updated_at = NOW() WHERE id = $2', [difference, userId]);
+  const admin = await queryOne(`SELECT id FROM users WHERE role = 'admin' ORDER BY joined_at ASC LIMIT 1`);
+  if (admin) await query('UPDATE users SET wallet_balance = wallet_balance + $1, updated_at = NOW() WHERE id = $2', [difference, admin.id]);
+  await computeLowestUniqueBid(bid.auction_id as string);
+  res.json({ success: true, message: 'Bid updated successfully', data: { ...updated, amount: amountNum } });
+}));
+
+// DELETE /api/bids/:bidId — customer: cancel own bid while auction is active
+router.delete('/:bidId', authenticate, asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req as any).user.userId;
+  const bid = await queryOne(
+    `SELECT b.id, b.auction_id, b.bidder_id, b.amount, a.status
+     FROM bids b JOIN auctions a ON a.id = b.auction_id WHERE b.id = $1`,
+    [req.params.bidId]
+  );
+  if (!bid) { res.status(404).json({ success: false, message: 'Bid not found' }); return; }
+  if (bid.bidder_id !== userId) { res.status(403).json({ success: false, message: 'You can only cancel your own bid' }); return; }
+  if (bid.status !== 'active') { res.status(400).json({ success: false, message: 'Bids can only be cancelled while the auction is active' }); return; }
+
+  await query('DELETE FROM bids WHERE id = $1', [req.params.bidId]);
+  const amount = Number(bid.amount);
+  await query('UPDATE users SET wallet_balance = wallet_balance + $1, updated_at = NOW() WHERE id = $2', [amount, userId]);
+  const admin = await queryOne(`SELECT id FROM users WHERE role = 'admin' ORDER BY joined_at ASC LIMIT 1`);
+  if (admin) await query('UPDATE users SET wallet_balance = GREATEST(0, wallet_balance - $1), updated_at = NOW() WHERE id = $2', [amount, admin.id]);
+  await query(
+    `UPDATE auctions SET total_bids = (SELECT COUNT(*) FROM bids WHERE auction_id = $1),
+     total_participants = (SELECT COUNT(DISTINCT bidder_id) FROM bids WHERE auction_id = $1), updated_at = NOW() WHERE id = $1`,
+    [bid.auction_id]
+  );
+  await computeLowestUniqueBid(bid.auction_id as string);
+  res.json({ success: true, message: 'Bid cancelled and amount refunded' });
+}));
+
 // POST /api/bids/auction/:auctionId/finalize — admin: close auction & finalize winner
 router.post('/auction/:auctionId/finalize', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   const { auctionId } = req.params;
