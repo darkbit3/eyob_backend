@@ -56,23 +56,14 @@ async function computeLowestUniqueBid(auctionId: string) {
 
 // GET /api/bids/auction/:auctionId — get bid log for an auction
 router.get('/auction/:auctionId', authenticate, asyncHandler(async (req: Request, res: Response) => {
-  const user = (req as any).user;
-  const isAdmin = user.role === 'admin';
-
   const rows = await query(
-    isAdmin
-      ? `SELECT b.id, b.auction_id, b.bidder_id, b.masked_bidder_id,
-                b.amount, b.is_duplicate, b.is_lowest_unique, b.created_at,
-                u.name AS bidder_name, u.phone AS bidder_phone, u.photo_url AS bidder_photo
-         FROM bids b
-         LEFT JOIN users u ON u.id = b.bidder_id
-         WHERE b.auction_id = $1
-         ORDER BY b.amount ASC, b.created_at ASC`
-      : `SELECT b.id, b.auction_id, b.masked_bidder_id,
-                b.amount, b.is_duplicate, b.is_lowest_unique, b.created_at
-         FROM bids b
-         WHERE b.auction_id = $1
-         ORDER BY b.amount ASC, b.created_at ASC`,
+    `SELECT b.id, b.auction_id, b.bidder_id, b.masked_bidder_id,
+            b.amount, b.is_duplicate, b.is_lowest_unique, b.created_at,
+            u.name AS bidder_name, u.phone AS bidder_phone, u.photo_url AS bidder_photo
+     FROM bids b
+     LEFT JOIN users u ON u.id = b.bidder_id
+     WHERE b.auction_id = $1
+     ORDER BY b.amount ASC, b.created_at ASC`,
     [req.params.auctionId]
   );
 
@@ -162,6 +153,23 @@ router.post('/', authenticate, asyncHandler(async (req: Request, res: Response) 
       message: `Insufficient wallet balance. You need ${amountNum} ETB to place this bid.`,
     });
     return;
+  }
+
+  // Enforce max bids per user per auction from system_settings
+  const settingsRow = await queryOne('SELECT max_bids_per_user FROM system_settings LIMIT 1');
+  const maxBidsPerUser = Number(settingsRow?.max_bids_per_user ?? 0);
+  if (maxBidsPerUser > 0) {
+    const userBidCount = await queryOne(
+      'SELECT COUNT(*)::int AS cnt FROM bids WHERE auction_id = $1 AND bidder_id = $2',
+      [auction_id, userId]
+    );
+    if (Number(userBidCount?.cnt ?? 0) >= maxBidsPerUser) {
+      res.status(400).json({
+        success: false,
+        message: `You have reached the maximum of ${maxBidsPerUser} bid(s) allowed per user on this auction.`,
+      });
+      return;
+    }
   }
 
   // Generate masked ID

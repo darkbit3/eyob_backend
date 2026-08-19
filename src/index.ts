@@ -193,6 +193,7 @@ server.listen(PORT, async () => {
     await dbQuery(`UPDATE auctions SET bid_per_cost = 100 WHERE bid_per_cost IS NULL`);
     await dbQuery(`ALTER TABLE users    ADD COLUMN IF NOT EXISTS credits INTEGER NOT NULL DEFAULT 0`);
     await dbQuery(`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS metadata JSONB`);
+    await dbQuery(`ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS max_bids_per_user INTEGER NOT NULL DEFAULT 0`);
     // Drop old transactions type constraint completely so all transaction types are allowed
     await dbQuery(`ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_type_check`);
     // Add auction_id to transactions for per-auction profit tracking
