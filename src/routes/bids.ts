@@ -266,23 +266,35 @@ router.post('/', authenticate, asyncHandler(async (req: Request, res: Response) 
   });
 }));
 
-// PATCH /api/bids/:bidId — customer: edit own bid while auction is active
+// PATCH /api/bids/:bidId — edit bid (owner or admin) with full balance adjustment & transaction history
 router.patch('/:bidId', authenticate, asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req as any).user.userId;
+  const user = (req as any).user;
+  const userId = user.userId;
+  const isAdmin = user.role === 'admin';
   const amountNum = Number(req.body.amount);
+
   if (!Number.isFinite(amountNum) || amountNum <= 0) {
     res.status(400).json({ success: false, message: 'A valid bid amount is required' });
     return;
   }
 
   const bid = await queryOne(
-    `SELECT b.id, b.auction_id, b.bidder_id, b.amount, a.status, a.min_bid, a.max_bid, a.title
-     FROM bids b JOIN auctions a ON a.id = b.auction_id WHERE b.id = $1`,
+    `SELECT b.id, b.auction_id, b.bidder_id, b.amount, a.status, a.min_bid, a.max_bid, a.title, u.name as bidder_name
+     FROM bids b
+     JOIN auctions a ON a.id = b.auction_id
+     LEFT JOIN users u ON u.id = b.bidder_id
+     WHERE b.id = $1`,
     [req.params.bidId]
   );
   if (!bid) { res.status(404).json({ success: false, message: 'Bid not found' }); return; }
-  if (bid.bidder_id !== userId) { res.status(403).json({ success: false, message: 'You can only edit your own bid' }); return; }
-  if (bid.status !== 'active') { res.status(400).json({ success: false, message: 'Bids can only be edited while the auction is active' }); return; }
+  if (!isAdmin && bid.bidder_id !== userId) {
+    res.status(403).json({ success: false, message: 'You can only edit your own bid' });
+    return;
+  }
+  if (!isAdmin && bid.status !== 'active') {
+    res.status(400).json({ success: false, message: 'Bids can only be edited while the auction is active' });
+    return;
+  }
   if (amountNum < Number(bid.min_bid) || amountNum > Number(bid.max_bid)) {
     res.status(400).json({ success: false, message: `Bid amount must be between ${bid.min_bid} and ${bid.max_bid} ETB` });
     return;
@@ -290,49 +302,202 @@ router.patch('/:bidId', authenticate, asyncHandler(async (req: Request, res: Res
 
   const oldAmount = Number(bid.amount);
   const difference = amountNum - oldAmount;
+  const targetBidderId = bid.bidder_id;
+
+  // If new amount is higher, ensure bidder has enough wallet balance
   if (difference > 0) {
-    const user = await queryOne('SELECT wallet_balance FROM users WHERE id = $1', [userId]);
-    if (Number(user?.wallet_balance ?? 0) < difference) {
-      res.status(400).json({ success: false, message: `Insufficient wallet balance. You need ${difference} ETB more to edit this bid.` });
+    const bidderUser = await queryOne('SELECT wallet_balance FROM users WHERE id = $1', [targetBidderId]);
+    if (Number(bidderUser?.wallet_balance ?? 0) < difference) {
+      res.status(400).json({
+        success: false,
+        message: `Insufficient wallet balance. Bidder needs ${difference} ETB more to increase this bid.`
+      });
       return;
     }
   }
 
+  // Update bid in database
   const updated = await queryOne(
     'UPDATE bids SET amount = $1, is_duplicate = FALSE, is_lowest_unique = FALSE WHERE id = $2 RETURNING *',
     [amountNum, req.params.bidId]
   );
-  await query('UPDATE users SET wallet_balance = wallet_balance - $1, updated_at = NOW() WHERE id = $2', [difference, userId]);
-  const admin = await queryOne(`SELECT id FROM users WHERE role = 'admin' ORDER BY joined_at ASC LIMIT 1`);
-  if (admin) await query('UPDATE users SET wallet_balance = wallet_balance + $1, updated_at = NOW() WHERE id = $2', [difference, admin.id]);
+
+  // Adjust bidder wallet balance
+  await query(
+    'UPDATE users SET wallet_balance = wallet_balance - $1, updated_at = NOW() WHERE id = $2',
+    [difference, targetBidderId]
+  );
+
+  // Adjust admin wallet balance (difference credited/debited)
+  const admin = await queryOne(`SELECT id, name FROM users WHERE role = 'admin' ORDER BY joined_at ASC LIMIT 1`);
+  if (admin) {
+    await query(
+      'UPDATE users SET wallet_balance = wallet_balance + $1, updated_at = NOW() WHERE id = $2',
+      [difference, admin.id]
+    );
+  }
+
+  // Insert transaction history for the bidder, including edits with no balance change.
+  const isHigher = difference > 0;
+  await query(
+    `INSERT INTO transactions (user_id, user_name, type, amount, description, status)
+     VALUES ($1, $2, $3, $4, $5, 'completed')`,
+    [
+      targetBidderId,
+      bid.bidder_name || 'Customer',
+      difference === 0 ? 'bid_edited' : isHigher ? 'bid_placed' : 'refund',
+      -difference,
+      difference === 0
+        ? `Bid edited from ${oldAmount} ETB to ${amountNum} ETB on "${bid.title}" (no balance change)`
+        : `Bid adjusted from ${oldAmount} ETB to ${amountNum} ETB on "${bid.title}" (${isHigher ? `-${difference}` : `+${Math.abs(difference)}`} ETB)`,
+    ]
+  );
+
+  if (admin && difference !== 0) {
+    await query(
+      `INSERT INTO transactions (user_id, user_name, type, amount, description, status)
+       VALUES ($1, $2, $3, $4, $5, 'completed')`,
+      [
+        admin.id,
+        admin.name || 'Admin',
+        isHigher ? 'credit_purchase' : 'refund',
+        difference,
+        `Admin balance adjusted for bid edit on "${bid.title}" (${isHigher ? `+${difference}` : `${difference}`} ETB)`,
+      ]
+    );
+  }
+
+  // Re-compute auction winner & update participants
   await computeLowestUniqueBid(bid.auction_id as string);
-  res.json({ success: true, message: 'Bid updated successfully', data: { ...updated, amount: amountNum } });
+
+  // Push real-time WebSocket balance updates
+  try {
+    const { sendToUser } = await import('../ws/server');
+    const uRow = await queryOne(`SELECT wallet_balance, credits FROM users WHERE id = $1`, [targetBidderId]);
+    sendToUser(targetBidderId, {
+      type: 'balance_updated',
+      wallet_balance: Number(uRow?.wallet_balance || 0),
+      credits: Number(uRow?.credits || 0),
+    });
+    if (admin) {
+      const updatedAdmin = await queryOne('SELECT wallet_balance, credits FROM users WHERE id = $1', [admin.id]);
+      sendToUser(admin.id, {
+        type: 'balance_updated',
+        wallet_balance: Number(updatedAdmin?.wallet_balance || 0),
+      });
+    }
+  } catch (_e) {}
+
+  res.json({
+    success: true,
+    message: `Bid updated successfully from ${oldAmount} ETB to ${amountNum} ETB`,
+    data: { ...updated, amount: amountNum }
+  });
 }));
 
-// DELETE /api/bids/:bidId — customer: cancel own bid while auction is active
+// DELETE /api/bids/:bidId — cancel / delete bid (owner or admin) with full wallet refund & transaction log
 router.delete('/:bidId', authenticate, asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req as any).user.userId;
+  const user = (req as any).user;
+  const userId = user.userId;
+  const isAdmin = user.role === 'admin';
+
   const bid = await queryOne(
-    `SELECT b.id, b.auction_id, b.bidder_id, b.amount, a.status
-     FROM bids b JOIN auctions a ON a.id = b.auction_id WHERE b.id = $1`,
+    `SELECT b.id, b.auction_id, b.bidder_id, b.amount, a.status, a.title, u.name as bidder_name
+     FROM bids b
+     JOIN auctions a ON a.id = b.auction_id
+     LEFT JOIN users u ON u.id = b.bidder_id
+     WHERE b.id = $1`,
     [req.params.bidId]
   );
   if (!bid) { res.status(404).json({ success: false, message: 'Bid not found' }); return; }
-  if (bid.bidder_id !== userId) { res.status(403).json({ success: false, message: 'You can only cancel your own bid' }); return; }
-  if (bid.status !== 'active') { res.status(400).json({ success: false, message: 'Bids can only be cancelled while the auction is active' }); return; }
+  if (!isAdmin && bid.bidder_id !== userId) {
+    res.status(403).json({ success: false, message: 'You can only cancel your own bid' });
+    return;
+  }
+  if (!isAdmin && bid.status !== 'active') {
+    res.status(400).json({ success: false, message: 'Bids can only be cancelled while the auction is active' });
+    return;
+  }
 
+  const amount = Number(bid.amount || 0);
+  const targetBidderId = bid.bidder_id;
+
+  // 1. Delete the bid
   await query('DELETE FROM bids WHERE id = $1', [req.params.bidId]);
-  const amount = Number(bid.amount);
-  await query('UPDATE users SET wallet_balance = wallet_balance + $1, updated_at = NOW() WHERE id = $2', [amount, userId]);
-  const admin = await queryOne(`SELECT id FROM users WHERE role = 'admin' ORDER BY joined_at ASC LIMIT 1`);
-  if (admin) await query('UPDATE users SET wallet_balance = GREATEST(0, wallet_balance - $1), updated_at = NOW() WHERE id = $2', [amount, admin.id]);
+
+  // 2. Refund exact bid amount to bidder's wallet balance
   await query(
-    `UPDATE auctions SET total_bids = (SELECT COUNT(*) FROM bids WHERE auction_id = $1),
-     total_participants = (SELECT COUNT(DISTINCT bidder_id) FROM bids WHERE auction_id = $1), updated_at = NOW() WHERE id = $1`,
+    'UPDATE users SET wallet_balance = wallet_balance + $1, updated_at = NOW() WHERE id = $2',
+    [amount, targetBidderId]
+  );
+
+  // 3. Deduct from admin revenue balance
+  const admin = await queryOne(`SELECT id, name FROM users WHERE role = 'admin' ORDER BY joined_at ASC LIMIT 1`);
+  if (admin) {
+    await query(
+      'UPDATE users SET wallet_balance = GREATEST(0, wallet_balance - $1), updated_at = NOW() WHERE id = $2',
+      [amount, admin.id]
+    );
+    await query(
+      `INSERT INTO transactions (user_id, user_name, type, amount, description, status)
+       VALUES ($1, $2, 'refund', $3, $4, 'completed')`,
+      [
+        admin.id,
+        admin.name || 'Admin',
+        -amount,
+        `Admin balance reversed for cancelled bid on "${bid.title}" (-${amount} ETB)`,
+      ]
+    );
+  }
+
+  // 4. Record transaction history for bidder
+  await query(
+    `INSERT INTO transactions (user_id, user_name, type, amount, description, status)
+     VALUES ($1, $2, 'refund', $3, $4, 'completed')`,
+    [
+      targetBidderId,
+      bid.bidder_name || 'Customer',
+      amount,
+      `Bid cancelled and refunded for "${bid.title}" (+${amount} ETB)`
+    ]
+  );
+
+  // 5. Update auction totals
+  await query(
+    `UPDATE auctions SET
+       total_bids = (SELECT COUNT(*) FROM bids WHERE auction_id = $1),
+       total_participants = (SELECT COUNT(DISTINCT bidder_id) FROM bids WHERE auction_id = $1),
+       updated_at = NOW()
+     WHERE id = $1`,
     [bid.auction_id]
   );
+
+  // 6. Re-compute lowest unique bid
   await computeLowestUniqueBid(bid.auction_id as string);
-  res.json({ success: true, message: 'Bid cancelled and amount refunded' });
+
+  // 7. Push real-time WebSocket balance updates
+  try {
+    const { sendToUser } = await import('../ws/server');
+    const uRow = await queryOne(`SELECT wallet_balance, credits FROM users WHERE id = $1`, [targetBidderId]);
+    sendToUser(targetBidderId, {
+      type: 'balance_updated',
+      wallet_balance: Number(uRow?.wallet_balance || 0),
+      credits: Number(uRow?.credits || 0),
+    });
+    if (admin) {
+      const updatedAdmin = await queryOne('SELECT wallet_balance, credits FROM users WHERE id = $1', [admin.id]);
+      sendToUser(admin.id, {
+        type: 'balance_updated',
+        wallet_balance: Number(updatedAdmin?.wallet_balance || 0),
+      });
+    }
+  } catch (_e) {}
+
+  res.json({
+    success: true,
+    message: `Bid of ${amount} ETB cancelled and refunded to wallet`,
+    data: { refundedAmount: amount, bidderId: targetBidderId }
+  });
 }));
 
 // POST /api/bids/auction/:auctionId/finalize — admin: close auction & finalize winner

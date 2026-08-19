@@ -392,14 +392,149 @@ router.post('/:id/unlock', authenticate, asyncHandler(async (req: Request, res: 
   }
 }));
 
-// DELETE /api/auctions/:id — admin: delete auction
+// DELETE /api/auctions/:id — admin: delete auction and refund all active bids & entry fees
 router.delete('/:id', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
-  const row = await queryOne(
-    `DELETE FROM auctions WHERE id = $1 RETURNING id, title`,
-    [req.params.id]
+  const auctionId = req.params.id;
+
+  const auction = await queryOne(
+    `SELECT id, title, status FROM auctions WHERE id = $1`,
+    [auctionId]
   );
-  if (!row) { res.status(404).json({ success: false, message: 'Auction not found' }); return; }
-  res.json({ success: true, message: 'Auction deleted', data: row });
+  if (!auction) { res.status(404).json({ success: false, message: 'Auction not found' }); return; }
+
+  // 1. Fetch all bids placed on this auction
+  const bids = await query(
+    `SELECT b.id, b.bidder_id, b.amount, u.name as bidder_name
+     FROM bids b
+     LEFT JOIN users u ON u.id = b.bidder_id
+     WHERE b.auction_id = $1`,
+    [auctionId]
+  );
+
+  // 2. Fetch all unlocks (entry fees) paid for this auction
+  const unlocks = await query(
+    `SELECT u.user_id, u.amount_paid, usr.name as user_name
+     FROM auction_unlocks u
+     LEFT JOIN users usr ON usr.id = u.user_id
+     WHERE u.auction_id = $1`,
+    [auctionId]
+  );
+
+  const admin = await queryOne(
+    `SELECT id, name FROM users WHERE role = 'admin' ORDER BY joined_at ASC LIMIT 1`
+  );
+
+  // 3. Refund all bids to bidders' wallets & deduct from admin revenue & record transactions
+  for (const b of bids) {
+    const amount = Number(b.amount || 0);
+    if (amount > 0 && b.bidder_id) {
+      // Refund to bidder
+      await query(
+        `UPDATE users SET wallet_balance = wallet_balance + $1, updated_at = NOW() WHERE id = $2`,
+        [amount, b.bidder_id]
+      );
+      // Deduct from admin
+      if (admin) {
+        await query(
+          `UPDATE users SET wallet_balance = GREATEST(0, wallet_balance - $1), updated_at = NOW() WHERE id = $2`,
+          [amount, admin.id]
+        );
+      }
+      // Record transaction history for bidder
+      await query(
+        `INSERT INTO transactions (user_id, user_name, type, amount, description, status)
+         VALUES ($1, $2, 'refund', $3, $4, 'completed')`,
+        [
+          b.bidder_id,
+          b.bidder_name || 'Customer',
+          amount,
+          `Bid refund for deleted auction "${auction.title}" (+${amount} ETB)`
+        ]
+      );
+      // Send notification to bidder
+      await query(
+        `INSERT INTO notifications (user_id, type, title, message)
+         VALUES ($1, 'general', 'Auction Cancelled & Bid Refunded 💰', $2)`,
+        [
+          b.bidder_id,
+          `The auction "${auction.title}" was deleted by admin. Your bid of ${amount} ETB has been refunded to your wallet.`
+        ]
+      );
+    }
+  }
+
+  // 4. Refund all unlock entry fees to users & record transaction history
+  for (const u of unlocks) {
+    const fee = Number(u.amount_paid || 0);
+    if (fee > 0 && u.user_id) {
+      await query(
+        `UPDATE users SET wallet_balance = wallet_balance + $1, updated_at = NOW() WHERE id = $2`,
+        [fee, u.user_id]
+      );
+      if (admin) {
+        await query(
+          `UPDATE users SET wallet_balance = GREATEST(0, wallet_balance - $1), updated_at = NOW() WHERE id = $2`,
+          [fee, admin.id]
+        );
+      }
+      await query(
+        `INSERT INTO transactions (user_id, user_name, type, amount, description, status)
+         VALUES ($1, $2, 'refund', $3, $4, 'completed')`,
+        [
+          u.user_id,
+          u.user_name || 'Customer',
+          fee,
+          `Entry fee refund for deleted auction "${auction.title}" (+${fee} ETB)`
+        ]
+      );
+    }
+  }
+
+  // 5. Delete the auction (ON DELETE CASCADE removes linked bids and unlocks)
+  await query(`DELETE FROM auctions WHERE id = $1`, [auctionId]);
+
+  // 6. Record Audit Log
+  const adminId = (req as any).user.userId;
+  await query(
+    `INSERT INTO audit_logs (admin_id, admin_name, action, target, details, ip_address)
+     VALUES ($1, $2, 'Deleted Auction', $3, $4, $5)`,
+    [
+      adminId,
+      (req as any).user.email,
+      auction.title as string,
+      `Auction deleted. Refunded ${bids.length} bid(s) and ${unlocks.length} unlock fee(s).`,
+      req.ip || '0.0.0.0'
+    ]
+  );
+
+  // 7. Push WebSocket updates to all affected users
+  try {
+    const { sendToUser } = await import('../ws/server');
+    const refundedUserIds = Array.from(new Set([...bids.map((b: any) => b.bidder_id), ...unlocks.map((u: any) => u.user_id)]));
+    for (const uid of refundedUserIds) {
+      if (uid) {
+        const uRow = await queryOne(`SELECT wallet_balance, credits FROM users WHERE id = $1`, [uid]);
+        sendToUser(uid, {
+          type: 'balance_updated',
+          wallet_balance: Number(uRow?.wallet_balance || 0),
+          credits: Number(uRow?.credits || 0),
+        });
+      }
+    }
+    if (admin) {
+      const updatedAdmin = await queryOne('SELECT wallet_balance, credits FROM users WHERE id = $1', [admin.id]);
+      sendToUser(admin.id, {
+        type: 'balance_updated',
+        wallet_balance: Number(updatedAdmin?.wallet_balance || 0),
+      });
+    }
+  } catch (_e) {}
+
+  res.json({
+    success: true,
+    message: `Auction deleted successfully. Refunded ${bids.length} bid(s) and ${unlocks.length} unlock fee(s).`,
+    data: { id: auctionId, title: auction.title, refundedBidsCount: bids.length, refundedUnlocksCount: unlocks.length }
+  });
 }));
 
 export default router;
