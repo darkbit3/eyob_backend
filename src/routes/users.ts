@@ -20,7 +20,47 @@ router.get('/', authenticate, requireAdmin, asyncHandler(async (_req: Request, r
   res.json({ success: true, data: users });
 }));
 
-// GET /api/users/me — get current user profile
+// POST /api/users/create — admin: create a new user (admin or customer)
+router.post('/create', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+  const { name, email, phone, password, role = 'customer' } = req.body;
+
+  if (!name || !email || !phone || !password) {
+    res.status(400).json({ success: false, message: 'name, email, phone, password are required' });
+    return;
+  }
+  if (!['admin', 'customer'].includes(role)) {
+    res.status(400).json({ success: false, message: 'role must be admin or customer' });
+    return;
+  }
+
+  // Check duplicates
+  const exists = await queryOne(
+    'SELECT id FROM users WHERE email = $1 OR phone = $2',
+    [email, phone]
+  );
+  if (exists) {
+    res.status(409).json({ success: false, message: 'A user with this email or phone already exists.' });
+    return;
+  }
+
+  const hash = await bcrypt.hash(String(password), Number(process.env.BCRYPT_SALT_ROUNDS) || 10);
+
+  const user = await queryOne(
+    `INSERT INTO users (name, email, phone, password_hash, role)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id, name, email, phone, role, status, wallet_balance, joined_at`,
+    [name, email, phone, hash, role]
+  );
+
+  const adminId = (req as any).user.userId;
+  await query(
+    `INSERT INTO audit_logs (admin_id, admin_name, action, target, details, ip_address)
+     VALUES ($1, $2, 'Created User', $3, $4, $5)`,
+    [adminId, (req as any).user.email, `${name} (${email})`, `Role: ${role}`, req.ip || '0.0.0.0']
+  );
+
+  res.status(201).json({ success: true, message: `User ${name} created successfully.`, data: user });
+}));
 router.get('/me', authenticate, asyncHandler(async (req: Request, res: Response) => {
   const userId = (req as any).user.userId;
 
