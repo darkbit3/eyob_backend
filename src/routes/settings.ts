@@ -17,6 +17,7 @@ router.patch('/', authenticate, requireAdmin, asyncHandler(async (req: Request, 
     platform_name, support_email, currency,
     min_bid_price, max_bid_price, default_bid_step,
     auto_winner_verification, maintenance_mode,
+    max_bids_per_user,
   } = req.body;
 
   const row = await queryOne(
@@ -29,6 +30,7 @@ router.patch('/', authenticate, requireAdmin, asyncHandler(async (req: Request, 
        default_bid_step         = COALESCE($6, default_bid_step),
        auto_winner_verification = COALESCE($7, auto_winner_verification),
        maintenance_mode         = COALESCE($8, maintenance_mode),
+       max_bids_per_user        = COALESCE($9, max_bids_per_user),
        updated_at               = NOW()
      WHERE id = 1
      RETURNING *`,
@@ -39,6 +41,7 @@ router.patch('/', authenticate, requireAdmin, asyncHandler(async (req: Request, 
       default_bid_step != null ? Number(default_bid_step) : null,
       auto_winner_verification != null ? Boolean(auto_winner_verification) : null,
       maintenance_mode != null ? Boolean(maintenance_mode) : null,
+      max_bids_per_user != null ? Number(max_bids_per_user) : null,
     ]
   );
 
