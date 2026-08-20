@@ -108,6 +108,7 @@ router.post('/login', asyncHandler(async (req: Request, res: Response) => {
   let cleanPhone = loginIdentifier.replace(/\s+/g, '');
   if (!isEmail && cleanPhone.startsWith('0')) cleanPhone = '+251' + cleanPhone.slice(1);
   if (!isEmail && cleanPhone.startsWith('251')) cleanPhone = '+' + cleanPhone;
+  if (!isEmail && /^[79]\d{8}$/.test(cleanPhone)) cleanPhone = '+251' + cleanPhone;
   if (!isEmail && !/^\+251[79]\d{8}$/.test(cleanPhone)) {
     res.status(400).json({ success: false, message: 'Enter a valid Ethiopian phone number or email address' });
     return;

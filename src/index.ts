@@ -221,6 +221,11 @@ server.listen(PORT, async () => {
         updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+    await dbQuery(`
+      INSERT INTO role_permissions (role, permissions)
+      VALUES ('customer_support', '{"Dashboard": true, "Auctions": true}'::jsonb)
+      ON CONFLICT (role) DO NOTHING
+    `);
 
     // Create admin_bank_accounts table for managing official deposit accounts
     await dbQuery(`

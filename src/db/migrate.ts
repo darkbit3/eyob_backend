@@ -57,6 +57,11 @@ async function migrate() {
       updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+  await query(`
+    INSERT INTO role_permissions (role, permissions)
+    VALUES ('customer_support', '{"Dashboard": true, "Auctions": true}'::jsonb)
+    ON CONFLICT (role) DO NOTHING
+  `);
   console.log('  ✓ role_permissions');
 
   await query(`
