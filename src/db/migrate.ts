@@ -51,6 +51,15 @@ async function migrate() {
   console.log('  ✓ system_settings');
 
   await query(`
+    CREATE TABLE IF NOT EXISTS role_permissions (
+      role        VARCHAR(80) PRIMARY KEY,
+      permissions JSONB NOT NULL DEFAULT '{}'::jsonb,
+      updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  console.log('  ✓ role_permissions');
+
+  await query(`
     CREATE TABLE IF NOT EXISTS products (
       id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       name         VARCHAR(255)  NOT NULL,

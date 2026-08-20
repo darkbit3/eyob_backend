@@ -214,6 +214,14 @@ server.listen(PORT, async () => {
     await dbQuery(`ALTER TABLE payment_queue DROP CONSTRAINT IF EXISTS payment_queue_payment_method_check`);
     await dbQuery(`ALTER TABLE payment_queue ALTER COLUMN payment_method TYPE VARCHAR(120)`);
 
+    await dbQuery(`
+      CREATE TABLE IF NOT EXISTS role_permissions (
+        role        VARCHAR(80) PRIMARY KEY,
+        permissions JSONB NOT NULL DEFAULT '{}'::jsonb,
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
     // Create admin_bank_accounts table for managing official deposit accounts
     await dbQuery(`
       CREATE TABLE IF NOT EXISTS admin_bank_accounts (

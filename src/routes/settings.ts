@@ -5,6 +5,37 @@ import { asyncHandler } from '../middleware/errorHandler';
 
 const router = Router();
 
+// GET /api/settings/permissions — staff: load role permissions
+router.get('/permissions', authenticate, requireAdmin, asyncHandler(async (_req: Request, res: Response) => {
+  const rows = await query('SELECT role, permissions FROM role_permissions');
+  const permissions = Object.fromEntries(rows.map((row: any) => [row.role, row.permissions || {}]));
+  res.json({ success: true, data: permissions });
+}));
+
+// PUT /api/settings/permissions — admin: replace role permissions
+router.put('/permissions', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+  if ((req as any).user.role !== 'admin') {
+    res.status(403).json({ success: false, message: 'Only admins can update role permissions' });
+    return;
+  }
+  const permissions = req.body?.permissions;
+  if (!permissions || typeof permissions !== 'object' || Array.isArray(permissions)) {
+    res.status(400).json({ success: false, message: 'A permissions object is required' });
+    return;
+  }
+
+  for (const [role, rolePermissions] of Object.entries(permissions)) {
+    if (!role || !rolePermissions || typeof rolePermissions !== 'object' || Array.isArray(rolePermissions)) continue;
+    await query(
+      `INSERT INTO role_permissions (role, permissions, updated_at)
+       VALUES ($1, $2::jsonb, NOW())
+       ON CONFLICT (role) DO UPDATE SET permissions = EXCLUDED.permissions, updated_at = NOW()`,
+      [role, JSON.stringify(rolePermissions)]
+    );
+  }
+  res.json({ success: true, message: 'Role permissions saved' });
+}));
+
 // GET /api/settings — admin: get system settings
 router.get('/', authenticate, requireAdmin, asyncHandler(async (_req: Request, res: Response) => {
   const row = await queryOne('SELECT * FROM system_settings LIMIT 1');
