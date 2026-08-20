@@ -96,29 +96,32 @@ router.post('/register', asyncHandler(async (req: Request, res: Response) => {
 
 // POST /api/auth/login
 router.post('/login', asyncHandler(async (req: Request, res: Response) => {
-  const { phone, password } = req.body;
+  const { phone, identifier, password } = req.body;
+  const loginIdentifier = String(identifier ?? phone ?? '').trim();
 
-  if (!phone || !password) {
-    res.status(400).json({ success: false, message: 'Phone number and password are required' });
+  if (!loginIdentifier || !password) {
+    res.status(400).json({ success: false, message: 'Phone/email and password are required' });
     return;
   }
 
-  // Normalize phone — strip spaces, convert leading 0 → +251
-  let cleanPhone = String(phone).replace(/\s+/g, '');
-  if (cleanPhone.startsWith('0')) {
-    cleanPhone = '+251' + cleanPhone.slice(1);
-  }
-  if (!/^\+251[79]\d{8}$/.test(cleanPhone)) {
-    res.status(400).json({ success: false, message: 'Enter a valid Ethiopian phone number (+251 9X or +251 7X)' });
+  const isEmail = loginIdentifier.includes('@');
+  let cleanPhone = loginIdentifier.replace(/\s+/g, '');
+  if (!isEmail && cleanPhone.startsWith('0')) cleanPhone = '+251' + cleanPhone.slice(1);
+  if (!isEmail && cleanPhone.startsWith('251')) cleanPhone = '+' + cleanPhone;
+  if (!isEmail && !/^\+251[79]\d{8}$/.test(cleanPhone)) {
+    res.status(400).json({ success: false, message: 'Enter a valid Ethiopian phone number or email address' });
     return;
   }
 
-  const localPhone = cleanPhone.replace(/^\+251/, '0');
-  const internationalWithoutPlus = cleanPhone.replace(/^\+/, '');
+  const localPhone = isEmail ? '' : cleanPhone.replace(/^\+251/, '0');
+  const internationalWithoutPlus = isEmail ? '' : cleanPhone.replace(/^\+/, '');
   const user = await queryOne(
     `SELECT id, name, email, phone, password_hash, photo_url, role, status, wallet_balance, credits, joined_at
-     FROM users WHERE phone IN ($1, $2, $3) LIMIT 1`,
-    [cleanPhone, localPhone, internationalWithoutPlus]
+     FROM users
+     WHERE ($1::text <> '' AND LOWER(email) = LOWER($1))
+        OR ($2::text <> '' AND phone IN ($2, $3, $4))
+     LIMIT 1`,
+    [isEmail ? loginIdentifier : '', cleanPhone, localPhone, internationalWithoutPlus]
   );
 
   if (!user) {
