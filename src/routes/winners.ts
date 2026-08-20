@@ -45,11 +45,17 @@ router.get('/:auctionId/bids', authenticate, asyncHandler(async (req: Request, r
 }));
 
 // GET /api/winners/report/stats — dashboard stats
-router.get('/report/stats', authenticate, requireAdmin, asyncHandler(async (_req: Request, res: Response) => {
-  const totalClosed = await queryOne("SELECT COUNT(*) AS cnt FROM auctions WHERE status = 'closed'");
-  const withWinner  = await queryOne("SELECT COUNT(*) AS cnt FROM auctions WHERE status = 'closed' AND winner_id IS NOT NULL");
-  const avgBid      = await queryOne("SELECT AVG(lowest_unique_bid) AS avg FROM auctions WHERE status = 'closed' AND lowest_unique_bid IS NOT NULL");
-  const totalBids   = await queryOne("SELECT SUM(total_bids) AS total FROM auctions WHERE status = 'closed'");
+router.get('/report/stats', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+  const { date_from, date_to } = req.query as Record<string, string>;
+  const conditions = ["status = 'closed'"];
+  const params: string[] = [];
+  if (date_from) { params.push(date_from); conditions.push(`closed_at >= $${params.length}::date`); }
+  if (date_to) { params.push(date_to); conditions.push(`closed_at < ($${params.length}::date + interval '1 day')`); }
+  const where = conditions.join(' AND ');
+  const totalClosed = await queryOne(`SELECT COUNT(*) AS cnt FROM auctions WHERE ${where}`, params);
+  const withWinner  = await queryOne(`SELECT COUNT(*) AS cnt FROM auctions WHERE ${where} AND winner_id IS NOT NULL`, params);
+  const avgBid      = await queryOne(`SELECT AVG(lowest_unique_bid) AS avg FROM auctions WHERE ${where} AND lowest_unique_bid IS NOT NULL`, params);
+  const totalBids   = await queryOne(`SELECT SUM(total_bids) AS total FROM auctions WHERE ${where}`, params);
 
   res.json({
     success: true,

@@ -7,6 +7,12 @@ const router = Router();
 
 // GET /api/reports/revenue — monthly revenue summary
 router.get('/revenue', authenticate, requireAdmin, asyncHandler(async (_req: Request, res: Response) => {
+  const { date_from, date_to } = _req.query as Record<string, string>;
+  const dateConditions: string[] = [];
+  const dateParams: string[] = [];
+  if (date_from) { dateParams.push(date_from); dateConditions.push(`created_at >= $${dateParams.length}::date`); }
+  if (date_to) { dateParams.push(date_to); dateConditions.push(`created_at < ($${dateParams.length}::date + interval '1 day')`); }
+  const dateWhere = dateConditions.length ? `AND ${dateConditions.join(' AND ')}` : '';
   const rows = await query(
     `SELECT
        TO_CHAR(created_at, 'Mon YYYY') AS month,
@@ -14,54 +20,73 @@ router.get('/revenue', authenticate, requireAdmin, asyncHandler(async (_req: Req
        SUM(CASE WHEN type = 'credit_purchase' THEN amount ELSE 0 END) AS deposits,
        SUM(CASE WHEN type = 'refund'          THEN amount ELSE 0 END) AS refunds
      FROM transactions
-     WHERE created_at >= NOW() - INTERVAL '12 months'
+    WHERE created_at >= NOW() - INTERVAL '12 months' ${dateWhere}
      GROUP BY TO_CHAR(created_at, 'Mon YYYY'), DATE_TRUNC('month', created_at)
      ORDER BY DATE_TRUNC('month', created_at) ASC`
-  );
+  , dateParams);
   res.json({ success: true, data: rows });
 }));
 
 // GET /api/reports/users — monthly user growth
 router.get('/users', authenticate, requireAdmin, asyncHandler(async (_req: Request, res: Response) => {
+  const { date_from, date_to } = _req.query as Record<string, string>;
+  const dateConditions: string[] = [];
+  const dateParams: string[] = [];
+  if (date_from) { dateParams.push(date_from); dateConditions.push(`joined_at >= $${dateParams.length}::date`); }
+  if (date_to) { dateParams.push(date_to); dateConditions.push(`joined_at < ($${dateParams.length}::date + interval '1 day')`); }
+  const dateWhere = dateConditions.length ? `AND ${dateConditions.join(' AND ')}` : '';
   const rows = await query(
     `SELECT
        TO_CHAR(joined_at, 'Mon YYYY') AS month,
        COUNT(*) AS new_users
      FROM users
-     WHERE joined_at >= NOW() - INTERVAL '12 months'
+    WHERE joined_at >= NOW() - INTERVAL '12 months' ${dateWhere}
      GROUP BY TO_CHAR(joined_at, 'Mon YYYY'), DATE_TRUNC('month', joined_at)
      ORDER BY DATE_TRUNC('month', joined_at) ASC`
-  );
+  , dateParams);
   res.json({ success: true, data: rows });
 }));
 
 // GET /api/reports/categories — auction performance by category
 router.get('/categories', authenticate, requireAdmin, asyncHandler(async (_req: Request, res: Response) => {
+  const { date_from, date_to } = _req.query as Record<string, string>;
+  const dateConditions: string[] = [];
+  const dateParams: string[] = [];
+  if (date_from) { dateParams.push(date_from); dateConditions.push(`created_at >= $${dateParams.length}::date`); }
+  if (date_to) { dateParams.push(date_to); dateConditions.push(`created_at < ($${dateParams.length}::date + interval '1 day')`); }
+  const dateWhere = dateConditions.length ? `WHERE ${dateConditions.join(' AND ')}` : '';
   const rows = await query(
     `SELECT
        category,
        COUNT(*) AS auctions,
        SUM(total_bids) AS total_bids,
        SUM(retail_value) AS total_retail_value
-     FROM auctions
+    FROM auctions
+    ${dateWhere}
      GROUP BY category
      ORDER BY total_bids DESC`
-  );
+  , dateParams);
   res.json({ success: true, data: rows });
 }));
 
 // GET /api/reports/payments — payment method breakdown
 router.get('/payments', authenticate, requireAdmin, asyncHandler(async (_req: Request, res: Response) => {
+  const { date_from, date_to } = _req.query as Record<string, string>;
+  const dateConditions: string[] = [];
+  const dateParams: string[] = [];
+  if (date_from) { dateParams.push(date_from); dateConditions.push(`created_at >= $${dateParams.length}::date`); }
+  if (date_to) { dateParams.push(date_to); dateConditions.push(`created_at < ($${dateParams.length}::date + interval '1 day')`); }
+  const dateWhere = dateConditions.length ? `AND ${dateConditions.join(' AND ')}` : '';
   const rows = await query(
     `SELECT
        payment_method,
        COUNT(*) AS transaction_count,
        SUM(amount) AS total_amount
      FROM transactions
-     WHERE payment_method IS NOT NULL
+    WHERE payment_method IS NOT NULL ${dateWhere}
      GROUP BY payment_method
      ORDER BY total_amount DESC`
-  );
+  , dateParams);
   res.json({ success: true, data: rows });
 }));
 
