@@ -38,7 +38,7 @@ export function authenticate(req: Request, res: Response, next: NextFunction): v
 // ── Middleware: admin only ─────────────────────────────────────────────────
 export function requireAdmin(req: Request, res: Response, next: NextFunction): void {
   const user = (req as any).user as JwtPayload;
-  const staffRoles = new Set(['admin', 'customer_support', 'support_agent']);
+  const staffRoles = new Set(['admin', 'customer_support', 'customersupport', 'support_agent']);
   if (!user || !staffRoles.has(user.role)) {
     res.status(403).json({ success: false, message: 'Admin access required' });
     return;
