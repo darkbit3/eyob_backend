@@ -34,10 +34,19 @@ router.post('/create', authenticate, requireAdmin, asyncHandler(async (req: Requ
     ? role
     : String(role).toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 30) || 'customer';
 
-  // Check duplicates
+  let cleanPhone = String(phone).replace(/\s+/g, '');
+  if (cleanPhone.startsWith('0')) cleanPhone = '+251' + cleanPhone.slice(1);
+  else if (cleanPhone.startsWith('251')) cleanPhone = '+' + cleanPhone;
+
+  if (!/^\+251[79]\d{8}$/.test(cleanPhone)) {
+    res.status(400).json({ success: false, message: 'Phone must be a valid Ethiopian number' });
+    return;
+  }
+
+  // Check duplicates using the normalized phone
   const exists = await queryOne(
     'SELECT id FROM users WHERE email = $1 OR phone = $2',
-    [email, phone]
+    [email, cleanPhone]
   );
   if (exists) {
     res.status(409).json({ success: false, message: 'A user with this email or phone already exists.' });
@@ -50,7 +59,7 @@ router.post('/create', authenticate, requireAdmin, asyncHandler(async (req: Requ
     `INSERT INTO users (name, email, phone, password_hash, role)
      VALUES ($1, $2, $3, $4, $5)
      RETURNING id, name, email, phone, role, status, wallet_balance, joined_at`,
-    [name, email, phone, hash, finalRole]
+    [name, email, cleanPhone, hash, finalRole]
   );
 
   const adminId = (req as any).user.userId;

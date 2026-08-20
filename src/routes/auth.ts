@@ -113,10 +113,12 @@ router.post('/login', asyncHandler(async (req: Request, res: Response) => {
     return;
   }
 
+  const localPhone = cleanPhone.replace(/^\+251/, '0');
+  const internationalWithoutPlus = cleanPhone.replace(/^\+/, '');
   const user = await queryOne(
     `SELECT id, name, email, phone, password_hash, photo_url, role, status, wallet_balance, credits, joined_at
-     FROM users WHERE phone = $1 LIMIT 1`,
-    [cleanPhone]
+     FROM users WHERE phone IN ($1, $2, $3) LIMIT 1`,
+    [cleanPhone, localPhone, internationalWithoutPlus]
   );
 
   if (!user) {
