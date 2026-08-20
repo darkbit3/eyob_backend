@@ -70,17 +70,8 @@ router.get('/auction/:auctionId', authenticate, asyncHandler(async (req: Request
   res.json({ success: true, data: rows });
 }));
 
-// GET /api/bids — admin: list all bids for oversight
-router.get('/', authenticate, asyncHandler(async (req: Request, res: Response) => {
-
-  const user = (req as any).user;
-  const isAdmin = user.role === 'admin';
-
-  if (!isAdmin) {
-    res.status(403).json({ success: false, message: 'Admin access required' });
-    return;
-  }
-
+// GET /api/bids — staff: list all bids for permitted admin oversight pages
+router.get('/', authenticate, requireAdmin, asyncHandler(async (_req: Request, res: Response) => {
   const rows = await query(
     `SELECT b.id, b.auction_id, b.bidder_id, b.masked_bidder_id, b.amount,
             b.is_duplicate, b.is_lowest_unique, b.created_at
