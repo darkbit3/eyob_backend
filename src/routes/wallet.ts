@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query, queryOne } from '../db/client';
-import { authenticate, requireAdmin } from '../middleware/auth';
+import { authenticate, requireAdmin, requireSuperAdmin } from '../middleware/auth';
 import { asyncHandler } from '../middleware/errorHandler';
 
 const router = Router();
@@ -116,8 +116,8 @@ router.post('/queue', authenticate, asyncHandler(async (req: Request, res: Respo
   res.status(201).json({ success: true, message: 'Payment submission received. Awaiting admin verification.', data: row });
 }));
 
-// PATCH /api/wallet/queue/:id/approve — admin: approve deposit or withdrawal request
-router.patch('/queue/:id/approve', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+// PATCH /api/wallet/queue/:id/approve — super admin: approve deposit or withdrawal request
+router.patch('/queue/:id/approve', authenticate, requireSuperAdmin, asyncHandler(async (req: Request, res: Response) => {
   const item = await queryOne(
     `SELECT * FROM payment_queue WHERE id = $1 AND status = 'pending'`,
     [req.params.id]
@@ -259,8 +259,8 @@ router.patch('/queue/:id/approve', authenticate, requireAdmin, asyncHandler(asyn
     });
 }));
 
-// PATCH /api/wallet/queue/:id/reject — admin: reject payment or withdrawal
-router.patch('/queue/:id/reject', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+// PATCH /api/wallet/queue/:id/reject — super admin: reject payment or withdrawal
+router.patch('/queue/:id/reject', authenticate, requireSuperAdmin, asyncHandler(async (req: Request, res: Response) => {
   const { reason } = req.body;
   const rejectionReason = reason || 'Verification details do not match bank statement';
 

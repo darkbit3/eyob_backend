@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query, queryOne } from '../db/client';
-import { authenticate, requireAdmin } from '../middleware/auth';
+import { authenticate, requireAdmin, requireSuperAdmin } from '../middleware/auth';
 import { asyncHandler } from '../middleware/errorHandler';
 
 const router = Router();
@@ -392,8 +392,8 @@ router.post('/:id/unlock', authenticate, asyncHandler(async (req: Request, res: 
   }
 }));
 
-// DELETE /api/auctions/:id — admin: delete auction and refund all active bids & entry fees
-router.delete('/:id', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+// DELETE /api/auctions/:id — super admin only: delete auction and refund all active bids & entry fees
+router.delete('/:id', authenticate, requireSuperAdmin, asyncHandler(async (req: Request, res: Response) => {
   const auctionId = req.params.id;
 
   const auction = await queryOne(

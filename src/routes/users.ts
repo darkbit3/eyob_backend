@@ -199,8 +199,8 @@ router.delete('/:id', authenticate, requireSuperAdmin, asyncHandler(async (req: 
   res.json({ success: true, message: 'User deleted', data: user });
 }));
 
-// PATCH /api/users/:id/wallet — admin: manual wallet or credit adjustment
-router.patch('/:id/wallet', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+// PATCH /api/users/:id/wallet — super admin only: manual wallet or credit adjustment
+router.patch('/:id/wallet', authenticate, requireSuperAdmin, asyncHandler(async (req: Request, res: Response) => {
   const { amount, reason, type } = req.body; // type: 'wallet' | 'credits'
 
   if (amount === undefined || !reason || !type) {

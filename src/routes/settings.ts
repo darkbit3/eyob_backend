@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query, queryOne } from '../db/client';
-import { authenticate, requireAdmin } from '../middleware/auth';
+import { authenticate, requireAdmin, requireSuperAdmin } from '../middleware/auth';
 import { asyncHandler } from '../middleware/errorHandler';
 import crypto from 'crypto';
 
@@ -24,12 +24,8 @@ router.get('/permissions', authenticate, requireAdmin, asyncHandler(async (_req:
   res.json({ success: true, data: permissions });
 }));
 
-// PUT /api/settings/permissions — admin: replace role permissions
-router.put('/permissions', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
-  if ((req as any).user.role !== 'admin') {
-    res.status(403).json({ success: false, message: 'Only admins can update role permissions' });
-    return;
-  }
+// PUT /api/settings/permissions — super admin only: replace role permissions
+router.put('/permissions', authenticate, requireSuperAdmin, asyncHandler(async (req: Request, res: Response) => {
   const permissions = req.body?.permissions;
   if (!permissions || typeof permissions !== 'object' || Array.isArray(permissions)) {
     res.status(400).json({ success: false, message: 'A permissions object is required' });
@@ -48,14 +44,14 @@ router.put('/permissions', authenticate, requireAdmin, asyncHandler(async (req: 
   res.json({ success: true, message: 'Role permissions saved' });
 }));
 
-// GET /api/settings — admin: get system settings
+// GET /api/settings — staff: get system settings
 router.get('/', authenticate, requireAdmin, asyncHandler(async (_req: Request, res: Response) => {
   const row = await queryOne('SELECT * FROM system_settings LIMIT 1');
   res.json({ success: true, data: row });
 }));
 
-// PATCH /api/settings — admin: update system settings
-router.patch('/', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+// PATCH /api/settings — super admin only: update system settings
+router.patch('/', authenticate, requireSuperAdmin, asyncHandler(async (req: Request, res: Response) => {
   const {
     platform_name, support_email, currency,
     min_bid_price, max_bid_price, default_bid_step,
@@ -111,8 +107,8 @@ router.get('/bank-accounts', asyncHandler(async (_req: Request, res: Response) =
   res.json({ success: true, data: rows });
 }));
 
-// POST /api/settings/bank-accounts — Admin create new bank account
-router.post('/bank-accounts', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+// POST /api/settings/bank-accounts — Super Admin create new bank account
+router.post('/bank-accounts', authenticate, requireSuperAdmin, asyncHandler(async (req: Request, res: Response) => {
   const { method_name, account_number, account_holder } = req.body;
   if (!method_name || !account_number || !account_holder) {
     res.status(400).json({ success: false, message: 'method_name, account_number, and account_holder are required' });
@@ -127,8 +123,8 @@ router.post('/bank-accounts', authenticate, requireAdmin, asyncHandler(async (re
   res.status(201).json({ success: true, message: 'Official bank account added successfully!', data: row });
 }));
 
-// PUT /api/settings/bank-accounts/:id — Admin update bank account
-router.put('/bank-accounts/:id', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+// PUT /api/settings/bank-accounts/:id — Super Admin update bank account
+router.put('/bank-accounts/:id', authenticate, requireSuperAdmin, asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
   const { method_name, account_number, account_holder, is_active } = req.body;
   const row = await queryOne(
@@ -149,8 +145,8 @@ router.put('/bank-accounts/:id', authenticate, requireAdmin, asyncHandler(async 
   res.json({ success: true, message: 'Bank account updated successfully!', data: row });
 }));
 
-// DELETE /api/settings/bank-accounts/:id — Admin delete bank account
-router.delete('/bank-accounts/:id', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+// DELETE /api/settings/bank-accounts/:id — Super Admin delete bank account
+router.delete('/bank-accounts/:id', authenticate, requireSuperAdmin, asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
   await query('DELETE FROM admin_bank_accounts WHERE id = $1', [id]);
   res.json({ success: true, message: 'Bank account deleted successfully!' });
@@ -167,7 +163,7 @@ router.get('/payment-gateways/manage', authenticate, requireAdmin, asyncHandler(
   res.json({ success: true, data: rows.map(maskedGateway) });
 }));
 
-router.post('/payment-gateways', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+router.post('/payment-gateways', authenticate, requireSuperAdmin, asyncHandler(async (req: Request, res: Response) => {
   const { name, display_name, public_key = '', secret_key = '', is_active = true } = req.body;
   if (!name?.trim() || !display_name?.trim()) {
     res.status(400).json({ success: false, message: 'Gateway name and public display name are required' }); return;
@@ -180,7 +176,7 @@ router.post('/payment-gateways', authenticate, requireAdmin, asyncHandler(async 
   res.status(201).json({ success: true, data: row });
 }));
 
-router.put('/payment-gateways/:id', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+router.put('/payment-gateways/:id', authenticate, requireSuperAdmin, asyncHandler(async (req: Request, res: Response) => {
   const { name, display_name, public_key, secret_key, is_active } = req.body;
   const updates: string[] = [];
   const values: unknown[] = [];
@@ -210,7 +206,7 @@ router.put('/payment-gateways/:id', authenticate, requireAdmin, asyncHandler(asy
   res.json({ success: true, data: row });
 }));
 
-router.delete('/payment-gateways/:id', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+router.delete('/payment-gateways/:id', authenticate, requireSuperAdmin, asyncHandler(async (req: Request, res: Response) => {
   const row = await queryOne('DELETE FROM payment_gateways WHERE id = $1 RETURNING id', [req.params.id]);
   if (!row) { res.status(404).json({ success: false, message: 'Payment gateway not found' }); return; }
   res.json({ success: true });
