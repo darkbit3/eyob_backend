@@ -216,6 +216,14 @@ server.listen(PORT, async () => {
     await dbQuery(`ALTER TABLE payment_queue DROP CONSTRAINT IF EXISTS payment_queue_payment_method_check`);
     await dbQuery(`ALTER TABLE payment_queue ALTER COLUMN payment_method TYPE VARCHAR(120)`);
     await dbQuery(`
+      CREATE TABLE IF NOT EXISTS payment_gateways (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(), name VARCHAR(80) NOT NULL UNIQUE,
+        display_name VARCHAR(120) NOT NULL, public_key TEXT NOT NULL DEFAULT '',
+        secret_key TEXT NOT NULL DEFAULT '', is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await dbQuery(`
       CREATE TABLE IF NOT EXISTS advertisements (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(), title VARCHAR(160) NOT NULL,
         subtitle VARCHAR(255) NOT NULL DEFAULT '', image_url TEXT NOT NULL,
