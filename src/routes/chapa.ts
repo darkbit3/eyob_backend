@@ -28,7 +28,7 @@ function decryptSecret(value: string): string {
 // Customer calls this to get a Chapa checkout URL
 router.post('/initialize', authenticate, asyncHandler(async (req: Request, res: Response) => {
   const userId = (req as any).user.userId;
-  const { amount } = req.body;
+  const { amount, return_url } = req.body;
 
   const amt = Number(amount);
   if (!amt || amt < 10) {
@@ -100,6 +100,14 @@ router.post('/initialize', authenticate, asyncHandler(async (req: Request, res: 
     // fallback — omit phone so Chapa doesn't reject
     chapaPhone = '';
   }
+  const clientOrigin = typeof req.headers.origin === 'string' ? req.headers.origin : '';
+  const effectiveReturnBase = (typeof return_url === 'string' && return_url)
+    ? return_url
+    : (clientOrigin ? `${clientOrigin}/e1f2g3` : RETURN_URL);
+  const finalReturnUrl = effectiveReturnBase.includes('?')
+    ? `${effectiveReturnBase}&tx_ref=${txRef}&status=success`
+    : `${effectiveReturnBase}?tx_ref=${txRef}&status=success`;
+
   // Call Chapa initialize API
   const chapaBody: Record<string, string> = {
     amount: String(amt),
@@ -109,7 +117,7 @@ router.post('/initialize', authenticate, asyncHandler(async (req: Request, res: 
     last_name: lastName,
     tx_ref: txRef,
     callback_url: CALLBACK_URL,
-    return_url: `${RETURN_URL}?tx_ref=${txRef}&status=success`,
+    return_url: finalReturnUrl,
     'customization[title]': 'BidLow Wallet Top-Up',
     'customization[description]': `Deposit ${amt} ETB to your BidLow auction wallet`,
   };
