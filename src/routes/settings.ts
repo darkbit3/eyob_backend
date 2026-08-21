@@ -158,7 +158,7 @@ router.delete('/bank-accounts/:id', authenticate, requireAdmin, asyncHandler(asy
 
 // Payment gateways: public metadata is readable by customers; secrets are write-only.
 router.get('/payment-gateways', asyncHandler(async (_req: Request, res: Response) => {
-  const rows = await query('SELECT id, name, display_name, public_key, is_active, created_at, updated_at FROM payment_gateways WHERE is_active = TRUE ORDER BY display_name ASC');
+  const rows = await query('SELECT id, name, display_name, public_key, is_active, created_at, updated_at FROM payment_gateways WHERE is_active = TRUE AND secret_key <> \'\' ORDER BY display_name ASC');
   res.json({ success: true, data: rows });
 }));
 
