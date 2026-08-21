@@ -40,60 +40,42 @@ const PORT = Number(process.env.PORT) || 3000;
 app.use(helmet());
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
-// ── CORS — allow frontend, admin, render, and vercel domains ───────────────
-const allowedOrigins = [
-  process.env.FRONTEND_URL ?? 'https://eyob-z2xx.onrender.com',
-  process.env.ADMIN_URL ?? 'https://eyob-admin.onrender.com',
-  process.env.BACKEND_URL ?? 'https://eyob-backend.onrender.com',
-  'https://eyob-z2xx.onrender.com',
-  'https://eyob-admin.onrender.com',
-  'https://eyob-admin.vercel.app',
-  'https://eyob-topaz.vercel.app',
-];
+// ── CORS — explicit allowlist only, no platform-wide wildcards ─────────────
+// Set FRONTEND_URL / ADMIN_URL / BACKEND_URL in your .env to extend.
+const allowedOriginsSet = new Set<string>(
+  ([
+    process.env.FRONTEND_URL,
+    process.env.ADMIN_URL,
+    process.env.BACKEND_URL,
+    'https://eyob-z2xx.onrender.com',
+    'https://eyob-admin.onrender.com',
+    'https://eyob-admin.vercel.app',
+    'https://eyob-topaz.vercel.app',
+    'http://localhost:5173',
+    'http://localhost:5174',
+    'http://localhost:3000',
+  ].filter(Boolean) as string[]).map(u => u.replace(/\/$/, ''))
+);
 
-// Helper to check if origin is allowed (supports exact match and vercel.app preview domains)
 const isAllowedOrigin = (origin?: string): boolean => {
-  if (!origin) return true;
-  if (allowedOrigins.some(o => o && origin.replace(/\/$/, '') === o.replace(/\/$/, ''))) return true;
-  if (/^https:\/\/.*\.vercel\.app$/.test(origin)) return true;
-  if (/^https:\/\/.*\.onrender\.com$/.test(origin)) return true;
-  return false;
+  if (!origin) return false; // block no-Origin requests (server-to-server) by default
+  return allowedOriginsSet.has(origin.replace(/\/$/, ''));
 };
 
-// CORS: reflect allowed origins and handle preflight explicitly.
-const corsOptionsDelegate = (origin: string | undefined, callback: (err: Error | null, allow?: boolean | string) => void) => {
+const corsOptionsDelegate = (
+  origin: string | undefined,
+  callback: (err: Error | null, allow?: boolean | string) => void
+) => {
   if (!origin || isAllowedOrigin(origin)) {
     return callback(null, origin || true);
   }
-  console.warn(`CORS blocked origin: ${origin}`);
+  console.warn(`[CORS] Blocked origin: ${origin}`);
   return callback(null, false);
 };
 
 app.use(cors({ origin: corsOptionsDelegate, credentials: true }));
-
-// Ensure OPTIONS preflight requests receive CORS headers
+// Handle OPTIONS preflight with the same strict policy
 app.options('*', cors({ origin: corsOptionsDelegate, credentials: true }));
-
-// Fallback: explicitly set CORS headers on all responses and handle preflight
-app.use((req, res, next) => {
-  const origin = req.headers.origin as string | undefined;
-  if (origin && isAllowedOrigin(origin)) {
-    res.header('Access-Control-Allow-Origin', origin);
-  }
-  res.header('Access-Control-Allow-Credentials', 'true');
-  res.header('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS');
-  res.header(
-    'Access-Control-Allow-Headers',
-    'Origin, X-Requested-With, Content-Type, Accept, Authorization'
-  );
-
-  if (req.method === 'OPTIONS') {
-    // short-circuit preflight
-    res.sendStatus(204);
-    return;
-  }
-  next();
-});
 
 // ── Body Parsing ────────────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));

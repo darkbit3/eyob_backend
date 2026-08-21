@@ -1,20 +1,28 @@
 import jwt from 'jsonwebtoken';
 import { Request, Response, NextFunction } from 'express';
 
+// ── Roles ─────────────────────────────────────────────────────────────────────
+// Extend as new staff roles are added; keep in sync with DB role_permissions.
+export type AdminRole = 'admin' | 'customer_support' | 'customersupport' | 'support_agent';
+
 export interface JwtPayload {
   userId: string;
   email: string;
-  role: 'admin' | 'customer';
+  role: AdminRole | 'customer';
 }
 
 export function signToken(payload: JwtPayload): string {
-  return jwt.sign(payload, process.env.JWT_SECRET!, {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) throw new Error('JWT_SECRET env var is not set — refusing to sign token');
+  return jwt.sign(payload, secret, {
     expiresIn: process.env.JWT_EXPIRES_IN || '7d',
   } as jwt.SignOptions);
 }
 
 export function verifyToken(token: string): JwtPayload {
-  return jwt.verify(token, process.env.JWT_SECRET!) as JwtPayload;
+  const secret = process.env.JWT_SECRET;
+  if (!secret) throw new Error('JWT_SECRET env var is not set — refusing to verify token');
+  return jwt.verify(token, secret) as JwtPayload;
 }
 
 // ── Middleware: authenticate any signed-in user ────────────────────────────
@@ -35,16 +43,29 @@ export function authenticate(req: Request, res: Response, next: NextFunction): v
   }
 }
 
-// ── Middleware: admin only ─────────────────────────────────────────────────
+// ── Middleware: any staff member (admin + support roles) ───────────────────
+// Use for: read-heavy admin views (reports, audit log, user list, auction list,
+// announcement posting, winners list). NOT for money operations or destructive actions.
+const STAFF_ROLES = new Set<string>(['admin', 'customer_support', 'customersupport', 'support_agent']);
+
 export function requireAdmin(req: Request, res: Response, next: NextFunction): void {
   const user = (req as any).user as JwtPayload;
-  const staffRoles = new Set(['admin', 'customer_support', 'customersupport', 'support_agent']);
-  if (!user || !staffRoles.has(user.role)) {
-    res.status(403).json({ success: false, message: 'Admin access required' });
+  if (!user || !STAFF_ROLES.has(user.role)) {
+    res.status(403).json({ success: false, message: 'Staff access required' });
     return;
   }
   next();
 }
 
-// requireSuperAdmin is now identical to requireAdmin — kept as alias for backwards compatibility
-export const requireSuperAdmin = requireAdmin;
+// ── Middleware: true admin only ────────────────────────────────────────────
+// Use for: wallet adjustments, user deletion, payment approval/rejection,
+// settings changes, bank account management, payment gateway management,
+// auction create/delete, role permissions changes.
+export function requireSuperAdmin(req: Request, res: Response, next: NextFunction): void {
+  const user = (req as any).user as JwtPayload;
+  if (!user || user.role !== 'admin') {
+    res.status(403).json({ success: false, message: 'Full admin access required' });
+    return;
+  }
+  next();
+}

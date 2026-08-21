@@ -1,13 +1,35 @@
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
+import rateLimit from 'express-rate-limit';
 import { query, queryOne } from '../db/client';
 import { signToken } from '../middleware/auth';
 import { asyncHandler } from '../middleware/errorHandler';
 
 const router = Router();
 
+// ── Rate limiters ─────────────────────────────────────────────────────────────
+// Login: max 10 attempts per IP per 15 minutes
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { success: false, message: 'Too many login attempts. Please wait 15 minutes before trying again.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.ip ?? 'unknown',
+});
+
+// Register: max 5 new accounts per IP per hour (prevents mass account creation)
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  message: { success: false, message: 'Too many registration attempts from this IP. Please try again in an hour.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.ip ?? 'unknown',
+});
+
 // POST /api/auth/register
-router.post('/register', asyncHandler(async (req: Request, res: Response) => {
+router.post('/register', registerLimiter, asyncHandler(async (req: Request, res: Response) => {
   const { name, email, phone, password } = req.body;
 
   if (!name || !email || !phone || !password) {
@@ -95,7 +117,7 @@ router.post('/register', asyncHandler(async (req: Request, res: Response) => {
 }));
 
 // POST /api/auth/login
-router.post('/login', asyncHandler(async (req: Request, res: Response) => {
+router.post('/login', loginLimiter, asyncHandler(async (req: Request, res: Response) => {
   const { phone, identifier, password } = req.body;
   const loginIdentifier = String(identifier ?? phone ?? '').trim();
 
