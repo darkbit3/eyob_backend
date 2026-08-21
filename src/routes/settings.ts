@@ -182,13 +182,29 @@ router.post('/payment-gateways', authenticate, requireAdmin, asyncHandler(async 
 
 router.put('/payment-gateways/:id', authenticate, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   const { name, display_name, public_key, secret_key, is_active } = req.body;
+  const updates: string[] = [];
+  const values: unknown[] = [];
+  const addUpdate = (column: string, value: unknown) => {
+    values.push(value);
+    updates.push(`${column} = $${values.length}`);
+  };
+
+  if (name !== undefined) addUpdate('name', String(name).trim());
+  if (display_name !== undefined) addUpdate('display_name', String(display_name).trim());
+  if (public_key !== undefined) addUpdate('public_key', String(public_key).trim());
+  if (secret_key !== undefined) addUpdate('secret_key', secret_key ? encryptSecret(String(secret_key)) : '');
+  if (is_active !== undefined) addUpdate('is_active', Boolean(is_active));
+  if (updates.length === 0) {
+    res.status(400).json({ success: false, message: 'No gateway changes supplied' });
+    return;
+  }
+
+  values.push(req.params.id);
   const row = await queryOne(
-    `UPDATE payment_gateways SET name = COALESCE($1, name), display_name = COALESCE($2, display_name),
-       public_key = COALESCE($3, public_key), secret_key = CASE WHEN $4 IS NULL THEN secret_key ELSE $4 END,
-       is_active = COALESCE($5, is_active), updated_at = NOW() WHERE id = $6
+    `UPDATE payment_gateways SET ${updates.join(', ')}, updated_at = NOW()
+     WHERE id = $${values.length}
      RETURNING id, name, display_name, public_key, is_active, created_at, updated_at`,
-    [name?.trim() || null, display_name?.trim() || null, public_key === undefined ? null : public_key.trim(),
-      secret_key === undefined ? null : (secret_key ? encryptSecret(secret_key) : ''), is_active === undefined ? null : Boolean(is_active), req.params.id]
+    values
   );
   if (!row) { res.status(404).json({ success: false, message: 'Payment gateway not found' }); return; }
   res.json({ success: true, data: row });
