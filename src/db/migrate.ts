@@ -212,6 +212,17 @@ async function migrate() {
     )
   `);
   console.log('  ✓ announcements');
+  await query(`
+    CREATE TABLE IF NOT EXISTS advertisements (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(), title VARCHAR(160) NOT NULL,
+      subtitle VARCHAR(255) NOT NULL DEFAULT '', image_url TEXT NOT NULL,
+      target_url TEXT NOT NULL DEFAULT '', cta_label VARCHAR(60) NOT NULL DEFAULT 'Explore',
+      status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused')),
+      sort_order INTEGER NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  console.log('  ✓ advertisements');
 
   await query(`
     CREATE TABLE IF NOT EXISTS audit_logs (

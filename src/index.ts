@@ -21,6 +21,7 @@ import winnersRoutes      from './routes/winners';
 import reportsRoutes      from './routes/reports';
 import chapaRoutes        from './routes/chapa';
 import uploadRoutes       from './routes/upload';
+import advertisementRoutes from './routes/advertisements';
 
 import { warmPool } from './db/client';
 import { query as dbQuery } from './db/client';
@@ -137,6 +138,7 @@ app.use('/api/winners',       winnersRoutes);
 app.use('/api/reports',       reportsRoutes);
 app.use('/api/wallet/chapa',  chapaRoutes);
 app.use('/api/upload',        uploadRoutes);
+app.use('/api/advertisements', advertisementRoutes);
 
 // ── 404 & Error Handlers ──────────────────────────────────────────────────────
 app.use(notFound);
@@ -213,6 +215,16 @@ server.listen(PORT, async () => {
     // Drop payment_method check constraint completely so all payment methods (CBE, CBE Birr, Telebirr, Abyssinia, etc.) are allowed
     await dbQuery(`ALTER TABLE payment_queue DROP CONSTRAINT IF EXISTS payment_queue_payment_method_check`);
     await dbQuery(`ALTER TABLE payment_queue ALTER COLUMN payment_method TYPE VARCHAR(120)`);
+    await dbQuery(`
+      CREATE TABLE IF NOT EXISTS advertisements (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(), title VARCHAR(160) NOT NULL,
+        subtitle VARCHAR(255) NOT NULL DEFAULT '', image_url TEXT NOT NULL,
+        target_url TEXT NOT NULL DEFAULT '', cta_label VARCHAR(60) NOT NULL DEFAULT 'Explore',
+        status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused')),
+        sort_order INTEGER NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
 
     await dbQuery(`
       CREATE TABLE IF NOT EXISTS role_permissions (
