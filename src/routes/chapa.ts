@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { query, queryOne } from '../db/client';
 import { authenticate } from '../middleware/auth';
 import { asyncHandler } from '../middleware/errorHandler';
+import crypto from 'crypto';
 
 const router = Router();
 
@@ -9,6 +10,19 @@ const CHAPA_SECRET = process.env.CHAPA_SECRET_KEY || '';
 const CHAPA_API    = 'https://api.chapa.co/v1';
 const RETURN_URL   = process.env.CHAPA_RETURN_URL   || 'https://eyob-z2xx.onrender.com/wallet';
 const CALLBACK_URL = process.env.CHAPA_CALLBACK_URL || 'https://eyob-backend.onrender.com/api/wallet/chapa/callback';
+
+function decryptSecret(value: string): string {
+  if (!value) return '';
+  try {
+    const [ivHex, encryptedHex] = value.split(':');
+    const decipher = crypto.createDecipheriv(
+      'aes-256-cbc',
+      crypto.createHash('sha256').update(process.env.JWT_SECRET || 'bidlow-payment-config').digest(),
+      Buffer.from(ivHex, 'hex')
+    );
+    return Buffer.concat([decipher.update(Buffer.from(encryptedHex, 'hex')), decipher.final()]).toString('utf8');
+  } catch { return ''; }
+}
 
 // ── POST /api/wallet/chapa/initialize ────────────────────────────────────────
 // Customer calls this to get a Chapa checkout URL
@@ -19,6 +33,17 @@ router.post('/initialize', authenticate, asyncHandler(async (req: Request, res: 
   const amt = Number(amount);
   if (!amt || amt < 10) {
     res.status(400).json({ success: false, message: 'Minimum deposit is 10 ETB' });
+    return;
+  }
+
+  const gateway = await queryOne('SELECT secret_key FROM payment_gateways WHERE LOWER(name) = $1 AND is_active = TRUE', ['chapa']);
+  if (!gateway) {
+    res.status(503).json({ success: false, message: 'Chapa payments are currently unavailable.' });
+    return;
+  }
+  const chapaSecret = decryptSecret(gateway.secret_key as string) || CHAPA_SECRET;
+  if (!chapaSecret) {
+    res.status(503).json({ success: false, message: 'Chapa payment is not configured yet.' });
     return;
   }
 
@@ -96,7 +121,7 @@ router.post('/initialize', authenticate, asyncHandler(async (req: Request, res: 
   const chapaRes = await fetch(`${CHAPA_API}/transaction/initialize`, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${CHAPA_SECRET}`,
+      'Authorization': `Bearer ${chapaSecret}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(chapaBody),
@@ -149,10 +174,17 @@ router.get('/verify/:tx_ref', authenticate, asyncHandler(async (req: Request, re
     return;
   }
 
+  const gateway = await queryOne('SELECT secret_key FROM payment_gateways WHERE LOWER(name) = $1 AND is_active = TRUE', ['chapa']);
+  const chapaSecret = gateway ? (decryptSecret(gateway.secret_key as string) || CHAPA_SECRET) : '';
+  if (!chapaSecret) {
+    res.status(503).json({ success: false, message: 'Chapa payments are currently unavailable.' });
+    return;
+  }
+
   // Verify with Chapa
   const verifyRes = await fetch(`${CHAPA_API}/transaction/verify/${tx_ref}`, {
     method: 'GET',
-    headers: { 'Authorization': `Bearer ${CHAPA_SECRET}` },
+    headers: { 'Authorization': `Bearer ${chapaSecret}` },
   });
 
   if (!verifyRes.ok) {
